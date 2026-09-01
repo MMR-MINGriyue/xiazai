@@ -9,7 +9,9 @@ import (
 	"github.com/GopeedLab/gopeed/internal/fetcher"
 	"github.com/GopeedLab/gopeed/internal/protocol/bt"
 	"github.com/GopeedLab/gopeed/internal/protocol/ed2k"
+	"github.com/GopeedLab/gopeed/internal/protocol/ftp"
 	"github.com/GopeedLab/gopeed/internal/protocol/http"
+	"github.com/GopeedLab/gopeed/internal/protocol/sftp"
 	"github.com/GopeedLab/gopeed/pkg/base"
 	enginewebview "github.com/GopeedLab/gopeed/pkg/download/engine/webview"
 	"github.com/GopeedLab/gopeed/pkg/util"
@@ -171,6 +173,8 @@ func (cfg *DownloaderConfig) Init() *DownloaderConfig {
 			new(http.FetcherManager),
 			new(bt.FetcherManager),
 			new(ed2k.FetcherManager),
+			new(sftp.Manager),
+			new(ftp.Manager),
 		}
 	}
 	if cfg.RefreshInterval == 0 {
