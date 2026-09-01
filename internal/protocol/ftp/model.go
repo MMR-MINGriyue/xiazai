@@ -45,6 +45,8 @@ func splitChunks(size int64, n int) []*chunk {
 // config 是 ftp 协议的全局配置（DownloaderStoreConfig.ProtocolConfig 持久化）
 type config struct {
 	Connections int `json:"connections"`
+	// InsecureSkipVerify 跳过 TLS 证书校验（内网自签证书服务器用；默认 false）
+	InsecureSkipVerify bool `json:"insecureSkipVerify"`
 }
 
 func (c *config) init() {

@@ -2,6 +2,7 @@ package ftp
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,13 +76,20 @@ func (f *Fetcher) remotePath() (addr, rpath, user, pass string, err error) {
 	return
 }
 
-// dial 建立一条 FTP 控制连接（二进制模式）
+// dial 建立一条 FTP 控制连接（二进制模式）；ftps:// 走显式 TLS（AUTH TLS）
 func (f *Fetcher) dial() (*ftpclient.ServerConn, error) {
 	addr, _, user, pass, err := f.remotePath()
 	if err != nil {
 		return nil, err
 	}
-	conn, err := ftpclient.Dial(addr, ftpclient.DialWithTimeout(ftpTimeout))
+	opts := []ftpclient.DialOption{ftpclient.DialWithTimeout(ftpTimeout)}
+	if u, _ := url.Parse(f.meta.Req.URL); u != nil && strings.EqualFold(u.Scheme, "ftps") {
+		opts = append(opts, ftpclient.DialWithExplicitTLS(&tls.Config{
+			ServerName:         u.Hostname(),
+			InsecureSkipVerify: f.config != nil && f.config.InsecureSkipVerify, //nolint:gosec // 内网自签服务器场景可配
+		}))
+	}
+	conn, err := ftpclient.Dial(addr, opts...)
 	if err != nil {
 		return nil, err
 	}

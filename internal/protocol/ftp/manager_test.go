@@ -12,8 +12,11 @@ func TestManagerBasics(t *testing.T) {
 		t.Fatalf("name = %s", m.Name())
 	}
 	filters := m.Filters()
-	if len(filters) != 1 || !filters[0].Match("ftp://host/file") {
+	if len(filters) != 2 || !filters[0].Match("ftp://host/file") {
 		t.Fatal("filter should match ftp:// urls")
+	}
+	if !filters[1].Match("ftps://host/file") {
+		t.Fatal("filter should match ftps:// urls")
 	}
 	if filters[0].Match("http://host/file") {
 		t.Fatal("filter should not match http:// urls")

@@ -16,6 +16,7 @@ func (m *Manager) Name() string {
 func (m *Manager) Filters() []*fetcher.SchemeFilter {
 	return []*fetcher.SchemeFilter{
 		{Type: fetcher.FilterTypeUrl, Pattern: "ftp"},
+		{Type: fetcher.FilterTypeUrl, Pattern: "ftps"}, // 显式 TLS
 	}
 }
 
