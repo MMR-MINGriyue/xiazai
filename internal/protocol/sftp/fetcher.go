@@ -125,7 +125,8 @@ func (f *Fetcher) dial() (*sftp.Client, error) {
 		conn.Close()
 		return nil, err
 	}
-	sc, err := sftp.NewClient(ssh.NewClient(sshConn, chans, reqs), sftp.MaxPacket(512*1024))
+	// MaxPacketUnchecked: 大包提升吞吐；pkg/sftp 的 MaxPacket 上限 32KB 不够用
+	sc, err := sftp.NewClient(ssh.NewClient(sshConn, chans, reqs), sftp.MaxPacketUnchecked(512*1024))
 	if err != nil {
 		sshConn.Close()
 		return nil, err
