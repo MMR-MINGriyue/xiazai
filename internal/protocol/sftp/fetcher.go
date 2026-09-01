@@ -104,6 +104,19 @@ func (f *Fetcher) proxyDialer() proxy.Dialer {
 	return pd
 }
 
+// sshAuth 构建认证方式列表：配置了私钥则优先用密钥认证，密码始终兜底
+func (f *Fetcher) sshAuth(pass string) []ssh.AuthMethod {
+	auths := []ssh.AuthMethod{ssh.Password(pass)}
+	if f.config != nil && f.config.PrivateKeyPath != "" {
+		if keyBytes, err := os.ReadFile(f.config.PrivateKeyPath); err == nil {
+			if signer, err := ssh.ParsePrivateKey(keyBytes); err == nil {
+				auths = append([]ssh.AuthMethod{ssh.PublicKeys(signer)}, auths...)
+			}
+		}
+	}
+	return auths
+}
+
 // dial 建立一条 SSH+SFTP 连接
 func (f *Fetcher) dial() (*sftp.Client, error) {
 	addr, _, user, pass, err := f.remotePath()
@@ -112,7 +125,7 @@ func (f *Fetcher) dial() (*sftp.Client, error) {
 	}
 	cfg := &ssh.ClientConfig{
 		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
+		Auth:            f.sshAuth(pass),
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         dialTimeout,
 	}

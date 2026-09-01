@@ -1,9 +1,12 @@
 package sftp
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -14,6 +17,7 @@ import (
 	"github.com/GopeedLab/gopeed/pkg/base"
 	"github.com/gliderlabs/ssh"
 	gosftp "github.com/pkg/sftp"
+	xssh "golang.org/x/crypto/ssh"
 )
 
 // startTestSftpServer 在本进程内启动一个 SFTP 服务器，服务 root 目录。
@@ -173,5 +177,107 @@ func TestSftpResume(t *testing.T) {
 	got := fileSum(t, filepath.Join(outDir, "out.bin"))
 	if got != wantSum {
 		t.Fatal("hash mismatch after resume")
+	}
+}
+
+// startTestSftpServerWithKey 启动仅接受指定公钥的 SFTP 服务器（密码一律拒绝）
+func startTestSftpServerWithKey(t *testing.T, root string, pub ssh.PublicKey) string {
+	t.Helper()
+	server := &ssh.Server{
+		Addr: "127.0.0.1:0",
+		PasswordHandler: func(ctx ssh.Context, password string) bool {
+			return false
+		},
+		PublicKeyHandler: func(ctx ssh.Context, key ssh.PublicKey) bool {
+			return bytes.Equal(key.Marshal(), pub.Marshal())
+		},
+		SubsystemHandlers: map[string]ssh.SubsystemHandler{
+			"sftp": func(s ssh.Session) {
+				srv, err := gosftp.NewServer(s, gosftp.WithServerWorkingDirectory(root))
+				if err != nil {
+					return
+				}
+				srv.Serve()
+			},
+		},
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go server.Serve(ln)
+	t.Cleanup(func() { server.Close() })
+	return ln.Addr().String()
+}
+
+func TestSftpKeyAuth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	// 生成 ed25519 密钥对，私钥写入临时文件
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := xssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := xssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	name, wantSum := writeTestFile(t, root, 512*1024)
+	addr := startTestSftpServerWithKey(t, root, sshPub)
+	outDir := t.TempDir()
+
+	f := newTestFetcher(t, sftpURL(addr, filepath.Join(root, name)), outDir)
+	f.config.PrivateKeyPath = keyPath // 密钥优先，密码会被服务器拒绝
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	if got := fileSum(t, filepath.Join(outDir, "out.bin")); got != wantSum {
+		t.Fatal("hash mismatch with key auth")
+	}
+}
+
+func TestSftpKeyAuthMissingKeyFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := xssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	name, _ := writeTestFile(t, root, 1024)
+	addr := startTestSftpServerWithKey(t, root, sshPub)
+	outDir := t.TempDir()
+
+	// 未配置私钥，仅密码 → 服务器拒绝认证，Resolve 必须失败
+	f := newTestFetcher(t, sftpURL(addr, filepath.Join(root, name)), outDir)
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err == nil {
+		t.Fatal("expected auth failure without key")
 	}
 }

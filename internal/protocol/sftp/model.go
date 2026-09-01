@@ -45,6 +45,8 @@ func splitChunks(size int64, n int) []*chunk {
 // config 是 sftp 协议的全局配置（DownloaderStoreConfig.ProtocolConfig 持久化）
 type config struct {
 	Connections int `json:"connections"`
+	// PrivateKeyPath 指定私钥文件路径；设置后优先用密钥认证（密码作为兜底）
+	PrivateKeyPath string `json:"privateKeyPath"`
 }
 
 func (c *config) init() {
