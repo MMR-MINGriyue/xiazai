@@ -32,7 +32,8 @@ func (m *Manager) ParseName(u string) string {
 }
 
 func (m *Manager) AutoRename() bool {
-	return false
+	// 与 http 协议一致：同名文件自动改名，避免覆盖
+	return true
 }
 
 func (m *Manager) DefaultConfig() any {

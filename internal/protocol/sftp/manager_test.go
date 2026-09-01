@@ -21,8 +21,8 @@ func TestManagerBasics(t *testing.T) {
 	if m.ParseName("sftp://host:22/a/b/file.zip") != "file.zip" {
 		t.Fatalf("parseName = %s", m.ParseName("sftp://host:22/a/b/file.zip"))
 	}
-	if m.AutoRename() {
-		t.Fatal("autoRename should be false")
+	if !m.AutoRename() {
+		t.Fatal("autoRename should be true (avoid overwrite)")
 	}
 	cfg := m.DefaultConfig().(*config)
 	if cfg.Connections != 4 {
