@@ -46,6 +46,9 @@ type Fetcher struct {
 
 	// fileTasks 运行期构建的下载任务列表（单文件 1 个；目录多文件各 1 个）
 	fileTasks []*fileTask
+
+	// activeChunks 当前文件的工作 chunk 集合（worker/steal 共享，f.mu 保护）
+	activeChunks []*chunk
 }
 
 // fileTask 描述一个文件的下载任务
@@ -269,7 +272,7 @@ func (f *Fetcher) download() {
 		f.clients = append(f.clients, c)
 		f.mu.Unlock()
 	}
-	for _, ft := range f.fileTasks {
+	for i, ft := range f.fileTasks {
 		if ctx.Err() != nil {
 			return // Pause 触发，不发 done
 		}
@@ -287,12 +290,15 @@ func (f *Fetcher) download() {
 		if ft.info.Path != "" {
 			rpath = path.Join(basePath, filepath.ToSlash(ft.info.Path))
 		}
-		// 每个文件用 Connections 个 worker 并行分段下载，文件间顺序执行
+		// 设置当前文件的共享 chunk 集合（worker/steal 用），再启动该文件的 worker 批次
+		f.mu.Lock()
+		f.activeChunks = ft.chunks
+		f.mu.Unlock()
 		for i := 0; i < n; i++ {
 			f.wg.Add(1)
 			go func(idx int) {
 				defer f.wg.Done()
-				f.worker(idx, rpath, file, ft.chunks)
+				f.worker(idx, rpath, file)
 			}(i)
 		}
 		f.wg.Wait()
@@ -300,6 +306,15 @@ func (f *Fetcher) download() {
 		if ctx.Err() != nil {
 			return
 		}
+		// 同步 work stealing 切分结果到持久化切片（断点续传/完整性校验依赖）
+		f.mu.Lock()
+		ft.chunks = f.activeChunks
+		if ft.info.Path == "" {
+			f.data.Chunks = ft.chunks
+		} else {
+			f.data.FilesChunks[i] = ft.chunks
+		}
+		f.mu.Unlock()
 		if !chunksComplete(ft.chunks, ft.info.Size) {
 			f.done(fmt.Errorf("ftp: size mismatch for %s", ft.info.Name))
 			return
@@ -313,12 +328,13 @@ func (f *Fetcher) download() {
 func chunksComplete(chunks []*chunk, size int64) bool {
 	var total int64
 	for _, c := range chunks {
-		total += c.Downloaded
+		total += c.downloaded()
 	}
 	return total == size
 }
 
-func (f *Fetcher) worker(idx int, rpath string, file *os.File, chunks []*chunk) {
+// worker 循环领取未完成 chunk；空闲时从最慢的 busy chunk 尾部"接管"一段（IDM work stealing）
+func (f *Fetcher) worker(idx int, rpath string, file *os.File) {
 	conn := f.clients[idx]
 	for {
 		select {
@@ -326,9 +342,13 @@ func (f *Fetcher) worker(idx int, rpath string, file *os.File, chunks []*chunk) 
 			return
 		default:
 		}
-		ck := f.takeChunk(chunks)
+		ck := f.takeChunk()
 		if ck == nil {
-			return
+			// 没有空闲 chunk：切走一个 busy 慢 chunk 的尾部交给自己下载
+			ck = f.stealChunk()
+			if ck == nil {
+				return
+			}
 		}
 		if err := f.downloadChunk(conn, rpath, ck, file); err != nil {
 			if f.ctx.Err() == nil {
@@ -339,16 +359,47 @@ func (f *Fetcher) worker(idx int, rpath string, file *os.File, chunks []*chunk) 
 	}
 }
 
-func (f *Fetcher) takeChunk(chunks []*chunk) *chunk {
+// takeChunk 从当前文件 chunk 集合领取一个未完成的 chunk（标记 Busy）
+func (f *Fetcher) takeChunk() *chunk {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, c := range chunks {
+	for _, c := range f.activeChunks {
 		if !c.Busy && c.remain() > 0 {
 			c.Busy = true
 			return c
 		}
 	}
 	return nil
+}
+
+// stealChunk 找一个 Busy 且剩余充足的 chunk，从剩余区间的中点切开，
+// 返回尾部一段交给当前 worker 下载（原 chunk 保留前半继续由原 worker 下载）。
+// 返回 nil 表示没有可切的段（全部完成或剩余不足）。
+func (f *Fetcher) stealChunk() *chunk {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var target *chunk
+	var maxRemain int64
+	for _, c := range f.activeChunks {
+		if !c.Busy || c.remain() <= 0 {
+			continue
+		}
+		if c.remain() > maxRemain {
+			maxRemain, target = c.remain(), c
+		}
+	}
+	// 剩余不足 2×最小粒度时不再切分（避免碎片化）
+	if target == nil || maxRemain <= 2*stealMinChunkSize {
+		return nil
+	}
+
+	remainStart := target.Begin + target.downloaded()
+	split := remainStart + (target.end()-remainStart)/2
+	steal := &chunk{Begin: split + 1, End: target.End, Busy: true}
+	target.setEnd(split)
+	f.activeChunks = append(f.activeChunks, steal)
+	return steal
 }
 
 // downloadChunk 用 REST+RETR 从 offset 拉取该 chunk 剩余部分
@@ -358,7 +409,7 @@ func (f *Fetcher) downloadChunk(conn *ftpclient.ServerConn, rpath string, ck *ch
 		ck.Busy = false
 		f.mu.Unlock()
 	}()
-	offset := ck.Begin + ck.Downloaded
+	offset := ck.Begin + ck.downloaded()
 	// RetrFrom = REST <offset> + RETR <path>（服务器返回 125/150 后开始传输）
 	resp, err := conn.RetrFrom(rpath, uint64(offset))
 	if err != nil {
@@ -386,7 +437,7 @@ func (f *Fetcher) downloadChunk(conn *ftpclient.ServerConn, rpath string, ck *ch
 			}
 			offset += int64(read)
 			f.mu.Lock()
-			ck.Downloaded += int64(read)
+			ck.addDownloaded(int64(read))
 			f.mu.Unlock()
 		}
 		if err != nil {
@@ -458,7 +509,7 @@ func (f *Fetcher) Progress() fetcher.Progress {
 		for i, ft := range f.fileTasks {
 			var total int64
 			for _, c := range ft.chunks {
-				total += c.Downloaded
+				total += c.downloaded()
 			}
 			prog[i] = total
 		}
@@ -467,7 +518,7 @@ func (f *Fetcher) Progress() fetcher.Progress {
 	// 单文件：总和（向后兼容）
 	var total int64
 	for _, c := range f.data.Chunks {
-		total += c.Downloaded
+		total += c.downloaded()
 	}
 	return fetcher.Progress{total}
 }

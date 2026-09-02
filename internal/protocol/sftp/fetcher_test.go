@@ -399,3 +399,81 @@ func TestSftpRateLimit(t *testing.T) {
 		t.Fatal("hash mismatch with rate limit")
 	}
 }
+
+func TestStealChunkSplit(t *testing.T) {
+	f := &Fetcher{}
+	// 剩余不足 2×最小粒度 → 不可切
+	f.activeChunks = []*chunk{{Begin: 0, End: stealMinChunkSize, Downloaded: 0, Busy: true}}
+	if f.stealChunk() != nil {
+		t.Fatal("should not steal small chunk")
+	}
+	// 2MB chunk（剩余 2MB > 1MB）→ 从剩余中点切开
+	big := &chunk{Begin: 0, End: 2*1024*1024 - 1, Downloaded: 0, Busy: true}
+	f.activeChunks = []*chunk{big}
+	if f.stealChunk() == nil {
+		t.Fatal("should steal big chunk")
+	}
+	if len(f.activeChunks) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(f.activeChunks))
+	}
+	// 原 chunk 保留前半，新 chunk 从 split+1 开始，两段拼接覆盖 [0, 2MB-1]
+	half := f.activeChunks[0]
+	steal := f.activeChunks[1]
+	if half.end() >= steal.Begin || steal.end() != 2*1024*1024-1 {
+		t.Fatalf("split invalid: half=[0,%d] steal=[%d,%d]", half.end(), steal.Begin, steal.end())
+	}
+	if half.end()+1 != steal.Begin {
+		t.Fatalf("gap at split: half.end=%d steal.begin=%d", half.end(), steal.Begin)
+	}
+	// 切出的段必须 >= 最小粒度
+	if steal.size() < stealMinChunkSize || half.size() < stealMinChunkSize {
+		t.Fatalf("fragmented: half=%d steal=%d", half.size(), steal.size())
+	}
+}
+
+func TestSftpWorkStealing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	name, wantSum := writeTestFile(t, root, 8*1024*1024)
+	addr := startTestSftpServer(t, root)
+	outDir := t.TempDir()
+
+	f := &Fetcher{}
+	f.Setup(nil)
+	f.config.Connections = 4
+	f.meta.Req = &base.Request{URL: sftpURL(addr, filepath.Join(root, name))}
+	f.meta.Opts = &base.Options{Path: outDir, Name: "out.bin"}
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	// 手动构造不均 chunk：1 个 6MB 大段 + 4 个 512KB 小段（覆盖 8MB）
+	// 大段拖住一个 worker，其余 worker 秒下小段后触发 steal 切大段
+	f.data.Chunks = []*chunk{{Begin: 0, End: 6*1024*1024 - 1}}
+	pos := int64(6 * 1024 * 1024)
+	for i := 0; i < 4; i++ {
+		f.data.Chunks = append(f.data.Chunks, &chunk{Begin: pos, End: pos + 512*1024 - 1})
+		pos += 512 * 1024
+	}
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	if got := fileSum(t, filepath.Join(outDir, "out.bin")); got != wantSum {
+		t.Fatal("hash mismatch")
+	}
+	f.mu.Lock()
+	nchunks := len(f.data.Chunks)
+	f.mu.Unlock()
+	if nchunks <= 5 {
+		t.Fatalf("expected work stealing to split chunks, got %d chunks", nchunks)
+	}
+}

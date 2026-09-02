@@ -581,3 +581,71 @@ func TestFtpRateLimit(t *testing.T) {
 		t.Fatal("hash mismatch with rate limit")
 	}
 }
+
+func TestStealChunkSplit(t *testing.T) {
+	f := &Fetcher{}
+	f.activeChunks = []*chunk{{Begin: 0, End: stealMinChunkSize, Downloaded: 0, Busy: true}}
+	if f.stealChunk() != nil {
+		t.Fatal("should not steal small chunk")
+	}
+	big := &chunk{Begin: 0, End: 2*1024*1024 - 1, Downloaded: 0, Busy: true}
+	f.activeChunks = []*chunk{big}
+	if f.stealChunk() == nil {
+		t.Fatal("should steal big chunk")
+	}
+	if len(f.activeChunks) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(f.activeChunks))
+	}
+	half, steal := f.activeChunks[0], f.activeChunks[1]
+	if half.end()+1 != steal.Begin || steal.end() != 2*1024*1024-1 {
+		t.Fatalf("split invalid: half=[0,%d] steal=[%d,%d]", half.end(), steal.Begin, steal.end())
+	}
+	if steal.size() < stealMinChunkSize || half.size() < stealMinChunkSize {
+		t.Fatalf("fragmented: half=%d steal=%d", half.size(), steal.size())
+	}
+}
+
+func TestFtpWorkStealing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	name, wantSum := writeTestFile(t, root, 8*1024*1024)
+	addr := startTestFtpServer(t, root)
+	outDir := t.TempDir()
+
+	f := &Fetcher{}
+	f.Setup(nil)
+	f.config.Connections = 4
+	f.meta.Req = &base.Request{URL: fmt.Sprintf("ftp://user:pass@%s/%s", addr, name)}
+	f.meta.Opts = &base.Options{Path: outDir, Name: "out.bin"}
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	f.data.Chunks = []*chunk{{Begin: 0, End: 6*1024*1024 - 1}}
+	pos := int64(6 * 1024 * 1024)
+	for i := 0; i < 4; i++ {
+		f.data.Chunks = append(f.data.Chunks, &chunk{Begin: pos, End: pos + 512*1024 - 1})
+		pos += 512 * 1024
+	}
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	if fileSum(t, filepath.Join(outDir, "out.bin")) != wantSum {
+		t.Fatal("hash mismatch")
+	}
+	f.mu.Lock()
+	nchunks := len(f.data.Chunks)
+	f.mu.Unlock()
+	if nchunks <= 5 {
+		t.Fatalf("expected work stealing to split chunks, got %d chunks", nchunks)
+	}
+}

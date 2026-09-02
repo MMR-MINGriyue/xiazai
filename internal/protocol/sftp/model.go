@@ -1,20 +1,30 @@
 package sftp
 
-// chunk 表示文件的一个分段区间 [Begin, End]（闭区间）
+import "sync/atomic"
+
+// stealMinChunkSize 动态分段的最小切分粒度（IDM 式尾部接管的下限，避免碎片化）
+const stealMinChunkSize = 512 * 1024
+
+// chunk 表示文件的一个分段区间 [Begin, End]（闭区间）。
+// End/Downloaded 可能被并发修改（work stealing 切分 / 进度更新），一律走 atomic 访问。
 type chunk struct {
 	Begin      int64 `json:"begin"`
 	End        int64 `json:"end"`
 	Downloaded int64 `json:"downloaded"`
-	// Busy 标记该 chunk 正被某个 worker 处理（不持久化）
+	// Busy 标记该 chunk 正被某个 worker 处理（不持久化；读写都在 f.mu 保护下）
 	Busy bool `json:"-"`
 }
 
+func (c *chunk) end() int64            { return atomic.LoadInt64(&c.End) }
+func (c *chunk) setEnd(v int64)        { atomic.StoreInt64(&c.End, v) }
+func (c *chunk) downloaded() int64     { return atomic.LoadInt64(&c.Downloaded) }
+func (c *chunk) addDownloaded(v int64) { atomic.AddInt64(&c.Downloaded, v) }
 func (c *chunk) size() int64 {
-	return c.End - c.Begin + 1
+	return c.end() - c.Begin + 1
 }
 
 func (c *chunk) remain() int64 {
-	return c.size() - c.Downloaded
+	return c.size() - c.downloaded()
 }
 
 // splitChunks 把 size 字节切成 n 个连续分段；小文件（<1MB）或 n<=1 时返回单段
