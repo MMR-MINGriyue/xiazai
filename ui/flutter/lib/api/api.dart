@@ -19,6 +19,7 @@ import 'model/resolve_task.dart';
 import 'model/result.dart';
 import 'model/switch_extension.dart';
 import 'model/task.dart';
+import 'model/task_stats.dart';
 import 'model/update_check_extension_resp.dart';
 import 'model/update_extension_settings.dart';
 
@@ -166,6 +167,18 @@ Future<List<Task>> getTasks(List<Status> statuses) async {
       () => _client.dio.get(
           "/api/v1/tasks?${statuses.map((e) => "status=${e.name}").join("&")}"),
       (data) => (data as List).map((e) => Task.fromJson(e)).toList());
+}
+
+/// 拉取任务分段进度（http: connections；sftp/ftp: chunks）。
+/// 非 200/解析失败返回 null（部分状态无 stats）。
+Future<TaskStats?> fetchTaskStats(String id) async {
+  try {
+    return await _parse<TaskStats>(
+        () => _client.dio.get("api/v1/tasks/$id/stats"),
+        (data) => TaskStats.fromJson(data));
+  } catch (_) {
+    return null;
+  }
 }
 
 Future<void> pauseTask(String id) async {

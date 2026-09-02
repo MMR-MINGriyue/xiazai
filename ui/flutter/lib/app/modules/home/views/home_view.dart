@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../../api/model/task.dart';
+import '../../../../util/util.dart';
 import '../../../routes/app_pages.dart';
 import '../../../views/responsive_builder.dart';
+import '../../task/controllers/task_downloading_controller.dart';
 import '../controllers/home_controller.dart';
 
 class HomeView extends GetView<HomeController> {
@@ -82,7 +85,7 @@ class HomeView extends GetView<HomeController> {
                 // },
               ))
             ]),
-        bottomNavigationBar: ResponsiveBuilder.isNarrow(context)
+        bottomNavigationBar: Obx(() => ResponsiveBuilder.isNarrow(context)
             ? BottomNavigationBar(
                 items: <BottomNavigationBarItem>[
                   BottomNavigationBarItem(
@@ -155,8 +158,47 @@ class HomeView extends GetView<HomeController> {
             //           }
             //         },
             //       )
-            : const SizedBox.shrink(),
+            : _buildGlobalSpeedBar(context)),
       );
     });
+  }
+
+  /// 宽屏底部状态栏：全局下载速度 + 运行中任务数（IDM 式）
+  Widget _buildGlobalSpeedBar(BuildContext context) {
+    var speed = 0;
+    var running = 0;
+    if (Get.isRegistered<TaskDownloadingController>()) {
+      for (final t in Get.find<TaskDownloadingController>().tasks) {
+        if (t.status == Status.running) {
+          speed += t.progress.speed;
+          running++;
+        }
+      }
+    }
+    final theme = Theme.of(context);
+    return BottomAppBar(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Icon(Icons.downloading,
+              size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            '${Util.fmtByte(speed)}/s',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            running == 0
+                ? '无进行中任务'
+                : '$running 个任务下载中',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.disabledColor),
+          ),
+        ],
+      ),
+    );
   }
 }

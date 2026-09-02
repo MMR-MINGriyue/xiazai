@@ -11,6 +11,7 @@ import '../../../views/copy_button.dart';
 import '../controllers/task_controller.dart';
 import '../controllers/task_downloaded_controller.dart';
 import '../controllers/task_downloading_controller.dart';
+import 'task_detail_panel.dart';
 import 'task_downloaded_view.dart';
 import 'task_downloading_view.dart';
 
@@ -107,6 +108,8 @@ class TaskView extends GetView<TaskController> {
                       },
                     ),
                   ),
+                  // IDM 式分段进度可视化（仅选中任务渲染，内部自轮询）
+                  TaskDetailPanel(task: selectTask.value),
                 ],
               )),
         ),

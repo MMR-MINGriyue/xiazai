@@ -59,7 +59,15 @@ class CreateView extends GetView<CreateController> {
   final _btTrackerController = TextEditingController();
   final _archivePasswordController = TextEditingController();
 
-  final _availableSchemes = ["http:", "https:", "magnet:", "ed2k:"];
+  final _availableSchemes = [
+    "http:",
+    "https:",
+    "magnet:",
+    "ed2k:",
+    "sftp:",
+    "ftp:",
+    "ftps:",
+  ];
 
   final _skipVerifyCertController = false.obs;
   final _autoTorrentController = Rxn<bool>();
@@ -808,6 +816,13 @@ class CreateView extends GetView<CreateController> {
     }
     if (uppercaseUrl.startsWith("ED2K:")) {
       protocol = Protocol.ed2k;
+    }
+    if (uppercaseUrl.startsWith("SFTP:")) {
+      protocol = Protocol.sftp;
+    }
+    if (uppercaseUrl.startsWith("FTP:") ||
+        uppercaseUrl.startsWith("FTPS:")) {
+      protocol = Protocol.ftp;
     }
     return protocol;
   }
