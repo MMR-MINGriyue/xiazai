@@ -199,6 +199,7 @@ type DownloaderStoreConfig struct {
 
 	DownloadDir                string                 `json:"downloadDir"`    // DownloadDir is the default directory to save the downloaded files
 	MaxRunning                 int                    `json:"maxRunning"`     // MaxRunning is the max running download count
+	GlobalRateLimit            int64                  `json:"globalRateLimit"` // GlobalRateLimit is the global download rate limit (bytes/s); 0 = unlimited
 	ProtocolConfig             map[string]any         `json:"protocolConfig"` // ProtocolConfig is special config for each protocol
 	Extra                      map[string]any         `json:"extra"`
 	Proxy                      *DownloaderProxyConfig `json:"proxy"`

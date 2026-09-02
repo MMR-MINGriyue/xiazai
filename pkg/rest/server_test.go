@@ -1107,3 +1107,43 @@ func checkCode(code int, exceptCode model.RespCode) {
 		panic(fmt.Sprintf("code got = %d, want %d", code, exceptCode))
 	}
 }
+
+// TestGlobalRateLimitViaREST 验证全局限速通过 REST config 设置并可回读
+func TestGlobalRateLimitViaREST(t *testing.T) {
+	fileListener := doStart(&model.StartConfig{
+		Network: "tcp",
+		Address: "127.0.0.1:0",
+		Storage: model.StorageMem,
+	})
+	defer fileListener.Close()
+	defer func() {
+		if Downloader != nil {
+			Downloader.Clear()
+			Downloader = nil
+		}
+	}()
+
+	// PUT 设置全局限速 64KB/s
+	status, _, _ := doHttpRequest1("PUT", "/api/v1/config", nil, &base.DownloaderStoreConfig{
+		GlobalRateLimit: 65536,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("PUT /api/v1/config status = %d, want 200", status)
+	}
+
+	// GET 回读，确认字段持久化
+	status, _, body := doHttpRequest1("GET", "/api/v1/config", nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/v1/config status = %d, want 200", status)
+	}
+	var result model.Result[base.DownloaderStoreConfig]
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Code != 0 {
+		t.Fatalf("code = %d, want 0", result.Code)
+	}
+	if result.Data.GlobalRateLimit != 65536 {
+		t.Fatalf("globalRateLimit = %d, want 65536", result.Data.GlobalRateLimit)
+	}
+}

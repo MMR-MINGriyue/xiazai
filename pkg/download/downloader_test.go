@@ -3386,3 +3386,48 @@ func TestDownloader_PatchTask_NotFound(t *testing.T) {
 		t.Errorf("Patch() error = %v, want %v", err, ErrTaskNotFound)
 	}
 }
+
+// TestDownloader_GlobalRateLimitPersist 验证全局限速通过 REST config 持久化，
+// 且重启（重新 Setup）后自动恢复。
+func TestDownloader_GlobalRateLimitPersist(t *testing.T) {
+	dir := t.TempDir()
+
+	// 第一次启动：PutConfig 设置限速并持久化
+	d1 := NewDownloader(&DownloaderConfig{
+		Storage:    NewBoltStorage(dir),
+		StorageDir: dir,
+	})
+	if err := d1.Setup(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d1.PutConfig(&base.DownloaderStoreConfig{GlobalRateLimit: 65536}); err != nil {
+		t.Fatal(err)
+	}
+	if d1.cfg.Controller.Limiter == nil || d1.cfg.Controller.Limiter.Rate() != 65536 {
+		t.Fatalf("rate after PutConfig = %v, want 65536", d1.cfg.Controller.Limiter)
+	}
+	if err := d1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟重启：新实例从同一 storage 加载 config 并自动应用限速
+	d2 := NewDownloader(&DownloaderConfig{
+		Storage:    NewBoltStorage(dir),
+		StorageDir: dir,
+	})
+	if err := d2.Setup(); err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Clear()
+	if d2.cfg.Controller.Limiter == nil || d2.cfg.Controller.Limiter.Rate() != 65536 {
+		t.Fatalf("rate after reload = %v, want 65536", d2.cfg.Controller.Limiter)
+	}
+
+	// 关闭限速（<=0 清空 limiter）
+	if err := d2.PutConfig(&base.DownloaderStoreConfig{GlobalRateLimit: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if d2.cfg.Controller.Limiter != nil {
+		t.Fatalf("limiter should be nil after disabling, got rate %d", d2.cfg.Controller.Limiter.Rate())
+	}
+}

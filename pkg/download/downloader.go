@@ -177,6 +177,10 @@ func (d *Downloader) Setup() error {
 	}
 	// init default config
 	d.cfg.DownloaderStoreConfig.Init()
+	// apply persisted global rate limit
+	if d.cfg.DownloaderStoreConfig.GlobalRateLimit > 0 {
+		d.SetGlobalRateLimit(d.cfg.DownloaderStoreConfig.GlobalRateLimit)
+	}
 	// init protocol config, if not exist, use default config
 	for _, fm := range d.cfg.FetchManagers {
 		protocol := fm.Name()
@@ -1029,6 +1033,10 @@ func (d *Downloader) GetConfig() (*base.DownloaderStoreConfig, error) {
 
 func (d *Downloader) PutConfig(v *base.DownloaderStoreConfig) error {
 	d.cfg.DownloaderStoreConfig = v
+	// apply rate limit immediately (affects in-flight fetchers via shared limiter)
+	if d.cfg.Controller != nil {
+		d.cfg.Controller.SetGlobalRateLimit(v.GlobalRateLimit)
+	}
 	return d.storage.Put(bucketConfig, "config", v)
 }
 
