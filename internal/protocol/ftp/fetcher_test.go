@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GopeedLab/gopeed/internal/controller"
 	"github.com/GopeedLab/gopeed/pkg/base"
 )
 
@@ -539,5 +540,44 @@ func TestFtpDownloadDir(t *testing.T) {
 	prog := f.Progress()
 	if len(prog) != len(want) {
 		t.Fatalf("progress len = %d, want %d", len(prog), len(want))
+	}
+}
+
+func TestFtpRateLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	name, wantSum := writeTestFile(t, root, 2*1024*1024)
+	addr := startTestFtpServer(t, root)
+	outDir := t.TempDir()
+
+	ctl := controller.NewController()
+	ctl.SetGlobalRateLimit(512 * 1024)
+	f := &Fetcher{}
+	f.Setup(ctl)
+	f.meta.Req = &base.Request{URL: fmt.Sprintf("ftp://user:pass@%s/%s", addr, name)}
+	f.meta.Opts = &base.Options{Path: outDir, Name: "out.bin"}
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	elapsed := time.Since(start)
+	if elapsed < 2*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("elapsed %v out of range [2s, 10s] for 512KB/s limit", elapsed)
+	}
+	if fileSum(t, filepath.Join(outDir, "out.bin")) != wantSum {
+		t.Fatal("hash mismatch with rate limit")
 	}
 }

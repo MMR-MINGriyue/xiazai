@@ -143,9 +143,21 @@ func NewDownloader(cfg *DownloaderConfig) *Downloader {
 	return d
 }
 
+// SetGlobalRateLimit 设置全局限速（字节/秒；<=0 关闭）。对所有协议生效。
+func (d *Downloader) SetGlobalRateLimit(bytesPerSec int64) {
+	if d.cfg.Controller == nil {
+		d.cfg.Controller = controller.NewController()
+	}
+	d.cfg.Controller.SetGlobalRateLimit(bytesPerSec)
+}
+
+// SetGlobalRateLimit 设置默认下载器（CLI/Boot 用）的全局限速。
+func SetGlobalRateLimit(bytesPerSec int64) {
+	defaultDownloader.SetGlobalRateLimit(bytesPerSec)
+}
+
 func (d *Downloader) Setup() error {
 	d.blob = internalblob.NewRegistry("")
-
 	// setup storage
 	if err := d.storage.Setup([]string{bucketTask, bucketSave, bucketProtocolState, bucketConfig, bucketExtension, bucketExtensionStorage}); err != nil {
 		return err

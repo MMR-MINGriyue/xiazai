@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GopeedLab/gopeed/internal/controller"
 	"github.com/GopeedLab/gopeed/pkg/base"
 	"github.com/gliderlabs/ssh"
 	gosftp "github.com/pkg/sftp"
@@ -355,5 +356,46 @@ func TestSftpDownloadDir(t *testing.T) {
 	}
 	if prog.TotalDownloaded() != f.meta.Res.Size {
 		t.Fatalf("total downloaded = %d, want %d", prog.TotalDownloaded(), f.meta.Res.Size)
+	}
+}
+
+func TestSftpRateLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	name, wantSum := writeTestFile(t, root, 2*1024*1024)
+	addr := startTestSftpServer(t, root)
+	outDir := t.TempDir()
+
+	// 全局限速 512KB/s（桶突发容量=1s 令牌）
+	ctl := controller.NewController()
+	ctl.SetGlobalRateLimit(512 * 1024)
+	f := &Fetcher{}
+	f.Setup(ctl)
+	f.meta.Req = &base.Request{URL: sftpURL(addr, filepath.Join(root, name))}
+	f.meta.Opts = &base.Options{Path: outDir, Name: "out.bin"}
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	elapsed := time.Since(start)
+	// 2MB @ 512KB/s，1s 突发免费 → 理论 ~3s
+	if elapsed < 2*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("elapsed %v out of range [2s, 10s] for 512KB/s limit", elapsed)
+	}
+	if got := fileSum(t, filepath.Join(outDir, "out.bin")); got != wantSum {
+		t.Fatal("hash mismatch with rate limit")
 	}
 }

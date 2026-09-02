@@ -17,6 +17,7 @@ import (
 
 	"github.com/GopeedLab/gopeed/internal/controller"
 	"github.com/GopeedLab/gopeed/internal/fetcher"
+	"github.com/GopeedLab/gopeed/internal/ratelimit"
 	"github.com/GopeedLab/gopeed/internal/httpclient"
 	"github.com/GopeedLab/gopeed/pkg/base"
 	fhttp "github.com/GopeedLab/gopeed/pkg/protocol/http"
@@ -223,6 +224,9 @@ type Fetcher struct {
 	config *config
 	doneCh chan error
 
+	// limiter 全局限速器（来自 ctl，可为 nil）
+	limiter ratelimit.Limiter
+
 	impersonationSession *httpclient.ImpersonationSession
 
 	meta *fetcher.FetcherMeta
@@ -289,6 +293,9 @@ func (f *Fetcher) Setup(ctl *controller.Controller) {
 		f.meta = &fetcher.FetcherMeta{}
 	}
 	f.ctl.GetConfig(&f.config)
+	if f.ctl.Limiter != nil {
+		f.limiter = f.ctl.Limiter
+	}
 	if f.impersonationSession == nil {
 		f.impersonationSession = httpclient.NewImpersonationSession()
 	}
@@ -496,7 +503,7 @@ func (f *Fetcher) asyncPrefetch() {
 	}()
 
 	buf := make([]byte, 32*1024) // 32KB buffer
-	reader := NewTimeoutReader(resp.Body, readTimeout)
+	reader := NewTimeoutReader(f.newBodyReader(resp.Body), readTimeout)
 
 	for {
 		select {
@@ -709,6 +716,27 @@ func (f *Fetcher) doStart() error {
 	go f.downloadLoop()
 
 	return nil
+}
+
+// newBodyReader 包装响应体：叠加全局限速（limiter 为 nil 时原样返回）
+func (f *Fetcher) newBodyReader(body io.Reader) io.Reader {
+	if f.limiter == nil {
+		return body
+	}
+	return &limitReader{r: body, l: f.limiter}
+}
+
+type limitReader struct {
+	r io.Reader
+	l ratelimit.Limiter
+}
+
+func (lr *limitReader) Read(p []byte) (int, error) {
+	n, err := lr.r.Read(p)
+	if n > 0 {
+		lr.l.Acquire(int64(n))
+	}
+	return n, err
 }
 
 func (f *Fetcher) downloadLoop() {
@@ -1130,7 +1158,7 @@ func (f *Fetcher) downloadChunkOnce(conn *connection, client *http.Client, buf [
 		f.slowStart.onConnectSuccess()
 	}
 
-	reader := NewTimeoutReader(resp.Body, readTimeout)
+	reader := NewTimeoutReader(f.newBodyReader(resp.Body), readTimeout)
 	var responseBytesRead int64
 	for {
 		if conn.ctx.Err() != nil {
@@ -1310,7 +1338,7 @@ func (f *Fetcher) runConnectionWithResolveResp(conn *connection) {
 	}
 
 	// Download data from resolve response
-	reader := NewTimeoutReader(resp.Body, readTimeout)
+	reader := NewTimeoutReader(f.newBodyReader(resp.Body), readTimeout)
 	for {
 		if conn.ctx.Err() != nil {
 			return
@@ -1418,7 +1446,7 @@ func (f *Fetcher) runConnectionFallback(conn *connection) {
 				f.slowStart.onConnectSuccess()
 			}
 
-			reader := NewTimeoutReader(resp.Body, readTimeout)
+			reader := NewTimeoutReader(f.newBodyReader(resp.Body), readTimeout)
 			for {
 				if conn.ctx.Err() != nil {
 					return conn.ctx.Err()

@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"crypto/rand"
 	"context"
 	"crypto/md5"
 	"encoding/json"
@@ -2069,5 +2070,47 @@ func TestFetcher_Patch_CookieExpired(t *testing.T) {
 	got := test.FileMd5(test.DownloadFile)
 	if want != got {
 		t.Errorf("File MD5 mismatch: got %v, want %v", got, want)
+	}
+}
+
+func TestFetcher_RateLimit(t *testing.T) {
+	data := make([]byte, 2*1024*1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(gohttp.HandlerFunc(func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.WriteHeader(gohttp.StatusOK)
+		w.Write(data)
+	}))
+	defer srv.Close()
+
+	ctl := controller.NewController()
+	ctl.GetConfig = func(v any) {
+		json.Unmarshal([]byte(test.ToJson(new(FetcherManager).DefaultConfig())), v)
+	}
+	ctl.SetGlobalRateLimit(512 * 1024) // 512KB/s
+	fetcher := new(FetcherManager).Build()
+	fetcher.Setup(ctl)
+	opts := &base.Options{
+		Name:  "f.bin",
+		Path:  t.TempDir(),
+		Extra: &http.OptsExtra{Connections: 4},
+	}
+	if err := fetcher.Resolve(&base.Request{URL: srv.URL}, opts); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := fetcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fetcher.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	// 2MB @ 512KB/s，1s 突发免费 → 理论 ~3s
+	if elapsed < 2*time.Second || elapsed > 10*time.Second {
+		t.Fatalf("elapsed %v out of range [2s, 10s] for 512KB/s limit", elapsed)
 	}
 }

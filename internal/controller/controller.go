@@ -1,18 +1,34 @@
 package controller
 
 import (
-	"github.com/GopeedLab/gopeed/pkg/base"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+
+	"github.com/GopeedLab/gopeed/internal/ratelimit"
+	"github.com/GopeedLab/gopeed/pkg/base"
 )
 
 type Controller struct {
 	GetConfig func(v any)
 	GetProxy  func(requestProxy *base.RequestProxy) func(*http.Request) (*url.URL, error)
 	FileController
-	//ContextDialer() (proxy.Dialer, error)
+	// Limiter 全局限速器（所有协议共享）；nil 表示不限速。
+	Limiter ratelimit.Limiter
+}
+
+// SetGlobalRateLimit 设置全局限速（字节/秒）；<=0 关闭限速。
+func (c *Controller) SetGlobalRateLimit(bytesPerSec int64) {
+	if bytesPerSec <= 0 {
+		c.Limiter = nil
+		return
+	}
+	if c.Limiter == nil {
+		c.Limiter = ratelimit.NewTokenBucket(bytesPerSec)
+	} else {
+		c.Limiter.SetRate(bytesPerSec)
+	}
 }
 
 type FileController interface {

@@ -159,6 +159,9 @@ type DownloaderConfig struct {
 	WhiteDownloadDirs []string
 	WebViewProvider   enginewebview.Provider
 
+	// GlobalRateLimit 全局下载限速（字节/秒）；0 表示不限速
+	GlobalRateLimit int64
+
 	ProductionMode bool
 
 	*base.DownloaderStoreConfig
@@ -167,6 +170,9 @@ type DownloaderConfig struct {
 func (cfg *DownloaderConfig) Init() *DownloaderConfig {
 	if cfg.Controller == nil {
 		cfg.Controller = controller.NewController()
+	}
+	if cfg.GlobalRateLimit > 0 {
+		cfg.Controller.SetGlobalRateLimit(cfg.GlobalRateLimit)
 	}
 	if len(cfg.FetchManagers) == 0 {
 		cfg.FetchManagers = []fetcher.FetcherManager{

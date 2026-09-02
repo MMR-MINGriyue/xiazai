@@ -16,6 +16,7 @@ import (
 
 	"github.com/GopeedLab/gopeed/internal/controller"
 	"github.com/GopeedLab/gopeed/internal/fetcher"
+	"github.com/GopeedLab/gopeed/internal/ratelimit"
 	"github.com/GopeedLab/gopeed/pkg/base"
 	ftpclient "github.com/jlaffaye/ftp"
 )
@@ -39,6 +40,9 @@ type Fetcher struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
+
+	// limiter 全局限速器（来自 ctl，可为 nil）
+	limiter ratelimit.Limiter
 
 	// fileTasks 运行期构建的下载任务列表（单文件 1 个；目录多文件各 1 个）
 	fileTasks []*fileTask
@@ -65,6 +69,9 @@ func (f *Fetcher) Setup(ctl *controller.Controller) {
 	// 测试场景 ctl 可能为 nil；生产环境由 Downloader 注入配置
 	if f.ctl != nil && f.ctl.GetConfig != nil {
 		f.ctl.GetConfig(f.config)
+	}
+	if f.ctl != nil {
+		f.limiter = f.ctl.Limiter
 	}
 	f.config.init()
 }
@@ -369,6 +376,10 @@ func (f *Fetcher) downloadChunk(conn *ftpclient.ServerConn, rpath string, ck *ch
 		if read > 0 {
 			if int64(read) > ck.remain() {
 				read = int(ck.remain()) // 服务器可能多给，截断
+			}
+			// 全局限速：按实际读取字节数消费令牌（阻塞直到允许）
+			if f.limiter != nil {
+				f.limiter.Acquire(int64(read))
 			}
 			if _, werr := file.WriteAt(buf[:read], offset); werr != nil {
 				return werr

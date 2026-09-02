@@ -16,6 +16,9 @@ const progressWidth = 20
 
 func main() {
 	args := parse()
+	if *args.rateLimit > 0 {
+		download.SetGlobalRateLimit(*args.rateLimit)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
