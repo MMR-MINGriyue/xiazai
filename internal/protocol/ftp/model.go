@@ -60,5 +60,8 @@ func (c *config) init() {
 
 // fetcherData 是 Fetcher 的持久化状态（断点续传数据，Manager.Store/Restore 序列化）
 type fetcherData struct {
+	// 单文件模式：chunk 进度（向后兼容）
 	Chunks []*chunk `json:"chunks"`
+	// 多文件（目录）模式：每文件的 chunk 进度，顺序与 meta.Res.Files 一致
+	FilesChunks [][]*chunk `json:"filesChunks,omitempty"`
 }

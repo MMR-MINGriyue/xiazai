@@ -281,3 +281,79 @@ func TestSftpKeyAuthMissingKeyFails(t *testing.T) {
 		t.Fatal("expected auth failure without key")
 	}
 }
+
+// buildTestDir 构造测试目录树，返回 相对路径 -> sha256
+func buildTestDir(t *testing.T, root string) map[string]string {
+	t.Helper()
+	want := map[string]string{}
+	write := func(rel string, size int64) {
+		dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		data := make([]byte, size)
+		if _, err := rand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256(data)
+		want[rel] = hex.EncodeToString(h[:])
+	}
+	write("top.bin", 1024)
+	write("sub1/a.bin", 2*1024*1024)
+	write("sub1/sub2/b.bin", 512*1024)
+	return want
+}
+
+func TestSftpDownloadDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	want := buildTestDir(t, root)
+	addr := startTestSftpServer(t, root)
+	outDir := t.TempDir()
+
+	f := &Fetcher{}
+	f.Setup(nil)
+	f.config.Connections = 2
+	f.meta.Req = &base.Request{URL: sftpURL(addr, root)}
+	f.meta.Opts = &base.Options{Path: outDir}
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	if f.meta.Res.Name == "" || len(f.meta.Res.Files) != len(want) {
+		t.Fatalf("res name=%q files=%d want %d", f.meta.Res.Name, len(f.meta.Res.Files), len(want))
+	}
+	if f.meta.Res.Size <= 0 {
+		t.Fatal("total size should be positive")
+	}
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	// 校验落盘：outDir/<目录名>/<相对路径>
+	for rel, sum := range want {
+		got := fileSum(t, filepath.Join(outDir, f.meta.Res.Name, filepath.FromSlash(rel)))
+		if got != sum {
+			t.Fatalf("hash mismatch for %s", rel)
+		}
+	}
+	// 多文件进度：每文件一个元素
+	prog := f.Progress()
+	if len(prog) != len(want) {
+		t.Fatalf("progress len = %d, want %d", len(prog), len(want))
+	}
+	if prog.TotalDownloaded() != f.meta.Res.Size {
+		t.Fatalf("total downloaded = %d, want %d", prog.TotalDownloaded(), f.meta.Res.Size)
+	}
+}

@@ -84,7 +84,7 @@ func (s *testFtpServer) handle(conn net.Conn, tlsCfg *tls.Config) {
 		case "SYST":
 			fmt.Fprintf(conn, "215 UNIX Type: L8\r\n")
 		case "FEAT":
-			fmt.Fprintf(conn, "211-Features\r\n REST STREAM\r\n EPSV\r\n211 End\r\n")
+			fmt.Fprintf(conn, "211-Features\r\n MLST\r\n MLSD\r\n REST STREAM\r\n EPSV\r\n211 End\r\n")
 		case "OPTS", "NOOP":
 			fmt.Fprintf(conn, "200 OK\r\n")
 		case "PBSZ":
@@ -97,7 +97,7 @@ func (s *testFtpServer) handle(conn net.Conn, tlsCfg *tls.Config) {
 			fmt.Fprintf(conn, "250 OK\r\n")
 		case "SIZE":
 			fi, err := os.Stat(s.localPath(arg))
-			if err != nil {
+			if err != nil || fi.IsDir() {
 				fmt.Fprintf(conn, "550 File not found\r\n")
 			} else {
 				fmt.Fprintf(conn, "213 %d\r\n", fi.Size())
@@ -122,6 +122,39 @@ func (s *testFtpServer) handle(conn net.Conn, tlsCfg *tls.Config) {
 			dataLn = dl
 			p := dl.Addr().(*net.TCPAddr).Port
 			fmt.Fprintf(conn, "227 Entering Passive Mode (127,0,0,1,%d,%d)\r\n", p/256, p%256)
+		case "MLSD":
+			// RFC 3659 目录列举（数据连接输出 type=...;size=...; /name 行）
+			if dataLn == nil {
+				fmt.Fprintf(conn, "425 Use EPSV first\r\n")
+				continue
+			}
+			dconn, err := dataLn.Accept()
+			dataLn.Close()
+			dataLn = nil
+			if err != nil {
+				fmt.Fprintf(conn, "425 Data connection failed\r\n")
+				continue
+			}
+			if tlsCfg != nil {
+				dconn = tls.Server(dconn, tlsCfg)
+			}
+			fmt.Fprintf(conn, "150 Opening data connection\r\n")
+			entries, _ := os.ReadDir(s.localPath(arg))
+			w := bufio.NewWriter(dconn)
+			for _, e := range entries {
+				info, ierr := e.Info()
+				if ierr != nil {
+					continue
+				}
+				typ := "file"
+				if e.IsDir() {
+					typ = "dir"
+				}
+				fmt.Fprintf(w, "type=%s;size=%d; /%s\r\n", typ, info.Size(), e.Name())
+			}
+			w.Flush()
+			dconn.Close()
+			fmt.Fprintf(conn, "226 Transfer complete\r\n")
 		case "RETR":
 			if dataLn == nil {
 				fmt.Fprintf(conn, "425 Use EPSV first\r\n")
@@ -437,5 +470,74 @@ func TestFtpsResume(t *testing.T) {
 	}
 	if fileSum(t, filepath.Join(outDir, "out.bin")) != wantSum {
 		t.Fatal("hash mismatch after resume over TLS")
+	}
+}
+
+// buildTestDir 构造测试目录树，返回 相对路径 -> sha256
+func buildTestDir(t *testing.T, root string) map[string]string {
+	t.Helper()
+	want := map[string]string{}
+	write := func(rel string, size int64) {
+		dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		data := make([]byte, size)
+		if _, err := rand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		h := sha256.Sum256(data)
+		want[rel] = hex.EncodeToString(h[:])
+	}
+	write("top.bin", 1024)
+	write("sub1/a.bin", 2*1024*1024)
+	write("sub1/sub2/b.bin", 512*1024)
+	return want
+}
+
+func TestFtpDownloadDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	root := t.TempDir()
+	want := buildTestDir(t, root)
+	addr := startTestFtpServer(t, root)
+	outDir := t.TempDir()
+
+	f := &Fetcher{}
+	f.Setup(nil)
+	f.config.Connections = 2
+	f.meta.Req = &base.Request{URL: fmt.Sprintf("ftp://user:pass@%s/%s", addr, "")}
+	f.meta.Opts = &base.Options{Path: outDir}
+	// 直接解析目录路径（URL 末尾不带文件名，指向 root）
+	if err := f.Resolve(f.meta.Req, f.meta.Opts); err != nil {
+		t.Fatal(err)
+	}
+	if f.meta.Res.Name == "" || len(f.meta.Res.Files) != len(want) {
+		t.Fatalf("res name=%q files=%d want %d", f.meta.Res.Name, len(f.meta.Res.Files), len(want))
+	}
+	if err := f.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-f.doneCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timeout")
+	}
+	for rel, sum := range want {
+		got := fileSum(t, filepath.Join(outDir, f.meta.Res.Name, filepath.FromSlash(rel)))
+		if got != sum {
+			t.Fatalf("hash mismatch for %s", rel)
+		}
+	}
+	prog := f.Progress()
+	if len(prog) != len(want) {
+		t.Fatalf("progress len = %d, want %d", len(prog), len(want))
 	}
 }
