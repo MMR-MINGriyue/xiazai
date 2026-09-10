@@ -38,9 +38,9 @@ class BuildTaskListView extends GetView {
           tooltip: 'create'.tr,
           child: const Icon(Icons.add),
         ),
-        body: Obx(() {
-          return buildTaskList(context, tasks);
-        }));
+        // tasks 由外层 controller 的 Obx 传入快照，此处不再包 Obx
+        // （包了会因未读到 Rx 触发 GetX "improper use" 错误）
+        body: buildTaskList(context, tasks));
   }
 
   Widget _protocolBadge(BuildContext context, Task task) {

@@ -9,7 +9,11 @@ class TaskDownloadedView extends GetView<TaskDownloadedController> {
 
   @override
   Widget build(BuildContext context) {
-    return BuildTaskListView(
-        tasks: controller.tasks, selectedTaskIds: controller.selectedTaskIds);
+    return Obx(() {
+      // 读取 RxList，列表刷新时重建
+      final tasks = controller.tasks.toList();
+      return BuildTaskListView(
+          tasks: tasks, selectedTaskIds: controller.selectedTaskIds);
+    });
   }
 }

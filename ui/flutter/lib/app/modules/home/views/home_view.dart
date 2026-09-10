@@ -88,7 +88,7 @@ class HomeView extends GetView<HomeController> {
                 // },
               ))
             ]),
-        bottomNavigationBar: Obx(() => ResponsiveBuilder.isNarrow(context)
+        bottomNavigationBar: ResponsiveBuilder.isNarrow(context)
             ? BottomNavigationBar(
                 items: <BottomNavigationBarItem>[
                   BottomNavigationBarItem(
@@ -121,47 +121,7 @@ class HomeView extends GetView<HomeController> {
                   }
                 },
               )
-            // StylishBottomBar(
-            //         option: AnimatedBarOptions(
-            //           iconSize: 32,
-            //           barAnimation: BarAnimation.blink,
-            //           iconStyle: IconStyle.Default,
-            //           opacity: 0.3,
-            //         ),
-            //         items: [
-            //           BottomBarItem(
-            //               icon: const Icon(Icons.file_download),
-            //               selectedColor: Get.theme.primaryColor,
-            //               title: Text('downloading'.tr)),
-            //           BottomBarItem(
-            //               icon: const Icon(Icons.done),
-            //               selectedColor: Get.theme.primaryColor,
-            //               title: Text('downloaded'.tr)),
-            //           BottomBarItem(
-            //               icon: const Icon(Icons.settings),
-            //               selectedColor: Get.theme.primaryColor,
-            //               title: Text('setting'.tr)),
-            //         ],
-            //         // hasNotch: true,
-            //         currentIndex: controller.currentIndex.value,
-            //         onTap: (index) {
-            //           switch (index) {
-            //             case 0:
-            //               delegate.toNamed(Routes.DOWNLOADING);
-            //               controller.currentIndex.value = 0;
-            //               break;
-            //             case 1:
-            //               delegate.toNamed(Routes.DOWNLOADED);
-            //               controller.currentIndex.value = 1;
-            //               break;
-            //             case 2:
-            //               delegate.toNamed(Routes.SETTING);
-            //               controller.currentIndex.value = 2;
-            //               break;
-            //           }
-            //         },
-            //       )
-            : _buildGlobalSpeedBar(context)),
+            : _buildGlobalSpeedBar(context),
       );
     });
   }
@@ -229,20 +189,22 @@ class HomeView extends GetView<HomeController> {
             if (Util.isDesktop() &&
                 Get.isRegistered<FloatWindowController>()) ...[
               const SizedBox(width: 8),
-              Obx(() {
+              Builder(builder: (context) {
+                // 在同一个外层 Obx 内读取，避免嵌套 Obx
                 final floatOn = Get.find<FloatWindowController>().enabled.value;
                 return IconButton(
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
                   tooltip: floatOn ? 'floatWindowOff'.tr : 'floatWindowOn'.tr,
                   icon: Icon(
-                    floatOn ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
+                    floatOn
+                        ? Icons.close_fullscreen
+                        : Icons.picture_in_picture_alt,
                     color: floatOn
                         ? theme.colorScheme.primary
                         : theme.disabledColor,
                   ),
-                  onPressed: () =>
-                      Get.find<FloatWindowController>().toggle(),
+                  onPressed: () => Get.find<FloatWindowController>().toggle(),
                 );
               }),
             ],

@@ -15,7 +15,7 @@ class TaskDownloadingView extends GetView<TaskDownloadingController> {
         Expanded(
           child: Obx(() {
             // 读取 statusFilter 与 tasks，确保筛选/刷新都会重建
-            final filtered = controller.filteredTasks;
+            final filtered = controller.filteredTasks.toList();
             return BuildTaskListView(
                 tasks: filtered, selectedTaskIds: controller.selectedTaskIds);
           }),
