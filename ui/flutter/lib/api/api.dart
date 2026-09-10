@@ -22,6 +22,7 @@ import 'model/task.dart';
 import 'model/task_stats.dart';
 import 'model/update_check_extension_resp.dart';
 import 'model/update_extension_settings.dart';
+import 'model/video.dart';
 
 class _Client {
   static _Client? _instance;
@@ -320,4 +321,46 @@ Future<Response> forward(
     queryParameters: queryParameters,
     options: Options(method: method),
   );
+}
+
+/// 解析视频站链接，返回标题与清晰度列表。
+Future<VideoInfo> resolveVideo(String url) async {
+  return _parse(
+      () => _client.dio
+          .post("api/v1/video/resolve", data: {"url": url}),
+      (data) => VideoInfo.fromJson(data));
+}
+
+/// 创建视频下载 job（引擎多线程下载 + ffmpeg 合并）。
+Future<VideoJob> createVideoDownload({
+  required String url,
+  required String formatId,
+  String? title,
+  required String path,
+  String? name,
+}) async {
+  return _parse(
+      () => _client.dio.post("api/v1/video/download", data: {
+            "url": url,
+            "formatId": formatId,
+            if (title != null) "title": title,
+            "path": path,
+            if (name != null) "name": name,
+          }),
+      (data) => VideoJob.fromJson(data));
+}
+
+/// 诊断 yt-dlp / ffmpeg 是否可用。
+Future<VideoBinariesInfo> getVideoBinaries() async {
+  return _parse(() => _client.dio.get("api/v1/video/binaries"),
+      (data) => VideoBinariesInfo.fromJson(data));
+}
+
+/// 自动下载安装缺失的 yt-dlp / ffmpeg 到应用数据目录。
+Future<VideoBinariesInfo> installVideoBinaries(
+    {List<String>? components}) async {
+  return _parse(
+      () => _client.dio.post("api/v1/video/bins/install",
+          data: {if (components != null) "components": components}),
+      (data) => VideoBinariesInfo.fromJson(data));
 }

@@ -136,6 +136,13 @@ func BuildServer(startCfg *model.StartConfig) (*http.Server, net.Listener, error
 	r.Methods(http.MethodGet).Path("/api/v1/tasks/{id}/stats").HandlerFunc(GetStats)
 	r.Methods(http.MethodGet).Path("/api/v1/config").HandlerFunc(GetConfig)
 	r.Methods(http.MethodPut).Path("/api/v1/config").HandlerFunc(PutConfig)
+	// 视频站流水线（yt-dlp + ffmpeg）
+	r.Methods(http.MethodPost).Path("/api/v1/video/resolve").HandlerFunc(VideoResolve)
+	r.Methods(http.MethodPost).Path("/api/v1/video/download").HandlerFunc(VideoDownload)
+	r.Methods(http.MethodGet).Path("/api/v1/video/jobs").HandlerFunc(VideoJobs)
+	r.Methods(http.MethodGet).Path("/api/v1/video/jobs/{id}").HandlerFunc(VideoJob)
+	r.Methods(http.MethodGet).Path("/api/v1/video/binaries").HandlerFunc(VideoBinaries)
+	r.Methods(http.MethodPost).Path("/api/v1/video/bins/install").HandlerFunc(VideoBinInstall)
 	r.Methods(http.MethodPost).Path("/api/v1/extensions").HandlerFunc(InstallExtension)
 	r.Methods(http.MethodGet).Path("/api/v1/extensions").HandlerFunc(GetExtensions)
 	r.Methods(http.MethodGet).Path("/api/v1/extensions/{identity}").HandlerFunc(GetExtension)

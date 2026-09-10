@@ -18,6 +18,7 @@ import '../../../../api/model/request.dart';
 import '../../../../api/model/resolve_result.dart';
 import '../../../../api/model/resolve_task.dart';
 import '../../../../api/model/task.dart';
+import '../../../../api/model/video.dart';
 import '../../../../database/database.dart';
 import '../../../../util/input_formatter.dart';
 import '../../../../util/message.dart';
@@ -890,6 +891,17 @@ class CreateView extends GetView<CreateController> {
         */
         final isMultiLine = urls.length > 1;
         final isDirect = controller.directDownload.value || isMultiLine;
+
+        // 视频站链接：走 yt-dlp 解析 + 清晰度选择
+        if (!isWebFileChosen && !isMultiLine && !isDirect &&
+            looksLikeVideoUrl(submitUrl)) {
+          final handled = await _handleVideoUrl(submitUrl);
+          if (handled) {
+            return;
+          }
+          // handled=false：yt-dlp 不可用等，回退普通 HTTP 流程
+        }
+
         final opt = Options(
           name: isMultiLine ? "" : _renameController.text,
           path: _pathController.text,
@@ -928,6 +940,139 @@ class CreateView extends GetView<CreateController> {
       _confirmController.reset();
       controller.isConfirming.value = false;
     }
+  }
+
+  /// 视频站链接：解析清晰度并创建下载 job。
+  /// 返回 true=已处理；false=回退普通流程。
+  Future<bool> _handleVideoUrl(String url) async {
+    try {
+      var bins = await getVideoBinaries();
+      if (!bins.ready) {
+        final installed = await _offerInstallVideoBins(bins.missing);
+        if (!installed) {
+          return false;
+        }
+        bins = await getVideoBinaries();
+        if (!bins.ready) {
+          showMessage(
+            'videoInstallFail'.tr,
+            bins.missing.join(', '),
+          );
+          return false;
+        }
+      }
+
+      // 解析可能较慢，给 loading 提示
+      showMessage('videoResolving'.tr, url);
+      final info = await resolveVideo(url);
+      if (info.formats.isEmpty) {
+        showMessage('videoNoFormats'.tr, info.title);
+        return false;
+      }
+
+      final selected = await _showVideoFormatDialog(info);
+      if (selected == null) {
+        return true; // 用户取消
+      }
+
+      final path = _pathController.text;
+      final job = await createVideoDownload(
+        url: url,
+        formatId: selected.id,
+        title: info.title,
+        path: path,
+      );
+      showMessage(
+        'videoDownloadCreated'.tr,
+        'videoDownloadCreatedTip'.trParams({
+          'title': job.title,
+          'format': selected.label,
+        }),
+      );
+      Get.rootDelegate.offNamed(Routes.TASK);
+      return true;
+    } catch (e) {
+      showErrorMessage(e);
+      return false;
+    }
+  }
+
+  /// 缺组件时弹窗询问是否自动安装。返回 true=安装成功或用户选择继续。
+  Future<bool> _offerInstallVideoBins(List<String> missing) async {
+    final confirmed = await showDialog<bool>(
+      context: Get.context!,
+      builder: (_) => AlertDialog(
+        title: Text('videoBinariesMissing'.tr),
+        content: Text('videoBinariesMissingTip'.trParams({
+          'missing': missing.join(', '),
+        })),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(Get.context!).pop(false),
+            child: Text('cancel'.tr),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(Get.context!).pop(true),
+            child: Text('videoInstallBins'.tr),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      showMessage(
+        'videoBinariesMissing'.tr,
+        'videoBinariesMissingTip'.trParams({'missing': missing.join(', ')}),
+      );
+      return false;
+    }
+    showMessage('videoInstallBins'.tr, 'videoInstallRunning'.tr);
+    try {
+      final result = await installVideoBinaries();
+      if (result.ready) {
+        showMessage('videoInstallDone'.tr, result.ytDlp);
+        return true;
+      }
+      showMessage('videoInstallFail'.tr, result.missing.join(', '));
+      return false;
+    } catch (e) {
+      showErrorMessage(e);
+      return false;
+    }
+  }
+
+  Future<VideoFormatOption?> _showVideoFormatDialog(VideoInfo info) {
+    return showDialog<VideoFormatOption>(
+      context: Get.context!,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text(info.title, overflow: TextOverflow.ellipsis, maxLines: 2),
+        content: SizedBox(
+          width: 420,
+          height: 320,
+          child: ListView.builder(
+            itemCount: info.formats.length,
+            itemBuilder: (context, index) {
+              final f = info.formats[index];
+              final sizeText =
+                  f.size > 0 ? Util.fmtByte(f.size) : 'unknownSize'.tr;
+              return ListTile(
+                leading: const Icon(Icons.high_quality),
+                title: Text(f.label),
+                subtitle: Text(
+                    '${f.width}x$f.height · $sizeText · ${f.ext}'),
+                onTap: () => Navigator.of(context).pop(f),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(Get.context!).pop(),
+            child: Text('cancel'.tr),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Shows a dialog to ask if user wants to update pending task or create new
@@ -1028,6 +1173,8 @@ class CreateView extends GetView<CreateController> {
         }
         break;
       case Protocol.ed2k:
+      case Protocol.sftp:
+      case Protocol.ftp:
       case null:
         break;
     }
