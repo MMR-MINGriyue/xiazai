@@ -11,6 +11,7 @@ import '../../../../util/util.dart'; // Import the required packages
 import '../../../rpc/webview_rpc_overlay.dart';
 import '../../../rpc/webview_rpc_service.dart';
 import '../../../routes/app_pages.dart';
+import '../../float_window/views/float_window.dart';
 import '../controllers/app_controller.dart';
 
 class AppView extends GetView<AppController> {
@@ -53,6 +54,14 @@ class AppView extends GetView<AppController> {
           ];
           if (WebViewRpcService.instance.supported) {
             entries.add(OverlayEntry(builder: (_) => const WebViewRpcOverlay()));
+          }
+          // 悬浮进度窗（桌面）
+          if (Util.isDesktop() && Get.isRegistered<FloatWindowController>()) {
+            entries.add(OverlayEntry(
+              builder: (_) => FloatWindowOverlay(
+                controller: Get.find<FloatWindowController>(),
+              ),
+            ));
           }
           return Overlay(initialEntries: entries);
         },

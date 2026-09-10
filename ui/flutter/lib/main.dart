@@ -26,6 +26,7 @@ import 'util/api_endpoint.dart';
 import 'app/services/location_keep_alive_coordinator.dart';
 import 'app/services/traffic_service.dart';
 import 'app/services/video_job_service.dart';
+import 'app/modules/float_window/views/float_window.dart';
 
 class StartupArgs {
   static const flagHidden = "hidden";
@@ -148,6 +149,11 @@ Future<void> init(StartupArgs args) async {
     await Get.putAsync(() async => VideoJobService().init());
   } catch (e) {
     logger.e("video job service init fail", e);
+  }
+
+  // 悬浮进度窗控制器（桌面）
+  if (Util.isDesktop()) {
+    Get.put(FloatWindowController(), permanent: true);
   }
 
   // Auto-start incomplete tasks if enabled

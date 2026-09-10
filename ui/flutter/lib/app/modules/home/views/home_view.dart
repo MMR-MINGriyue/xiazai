@@ -7,6 +7,7 @@ import '../../../routes/app_pages.dart';
 import '../../../services/traffic_service.dart';
 import '../../../views/responsive_builder.dart';
 import '../../app/controllers/app_controller.dart';
+import '../../float_window/views/float_window.dart';
 import '../../task/controllers/task_downloading_controller.dart';
 import '../controllers/home_controller.dart';
 
@@ -225,6 +226,26 @@ class HomeView extends GetView<HomeController> {
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.disabledColor),
             ),
+            if (Util.isDesktop() &&
+                Get.isRegistered<FloatWindowController>()) ...[
+              const SizedBox(width: 8),
+              Obx(() {
+                final floatOn = Get.find<FloatWindowController>().enabled.value;
+                return IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  tooltip: floatOn ? 'floatWindowOff'.tr : 'floatWindowOn'.tr,
+                  icon: Icon(
+                    floatOn ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
+                    color: floatOn
+                        ? theme.colorScheme.primary
+                        : theme.disabledColor,
+                  ),
+                  onPressed: () =>
+                      Get.find<FloatWindowController>().toggle(),
+                );
+              }),
+            ],
           ],
         ),
       );
