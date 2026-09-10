@@ -364,3 +364,20 @@ Future<VideoBinariesInfo> installVideoBinaries(
           data: {if (components != null) "components": components}),
       (data) => VideoBinariesInfo.fromJson(data));
 }
+
+/// 列出全部视频下载 job（含合并状态）。
+Future<List<VideoJob>> listVideoJobs() async {
+  return _parse(() => _client.dio.get("api/v1/video/jobs"), (data) {
+    final list = data as List? ?? [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(VideoJob.fromJson)
+        .toList();
+  });
+}
+
+/// 查询单个视频 job。
+Future<VideoJob> getVideoJob(String id) async {
+  return _parse(() => _client.dio.get("api/v1/video/jobs/$id"),
+      (data) => VideoJob.fromJson(data));
+}

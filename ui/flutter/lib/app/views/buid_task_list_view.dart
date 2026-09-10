@@ -15,6 +15,7 @@ import '../modules/task/controllers/task_downloaded_controller.dart';
 import '../modules/task/controllers/task_downloading_controller.dart';
 import '../modules/task/views/task_view.dart';
 import '../routes/app_pages.dart';
+import '../services/video_job_service.dart';
 import 'file_icon.dart';
 
 class BuildTaskListView extends GetView {
@@ -91,6 +92,10 @@ class BuildTaskListView extends GetView {
       if (size > 0) Util.fmtByte(size),
       statusLabel,
     ];
+    final videoStatus = _videoJobStatus(task);
+    if (videoStatus.isNotEmpty) {
+      parts.add(videoStatus);
+    }
     if (parts.isEmpty) return const SizedBox.shrink();
     return Text(
       parts.join(' · '),
@@ -99,6 +104,72 @@ class BuildTaskListView extends GetView {
           .bodySmall
           ?.copyWith(color: Theme.of(context).disabledColor),
       overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  /// 视频流水线任务：展示 job 合并阶段（下载中/合并中/完成/失败）。
+  String _videoJobStatus(Task task) {
+    if (!Get.isRegistered<VideoJobService>()) return '';
+    if (!VideoJobService.isVideoTask(task)) return '';
+    final job = Get.find<VideoJobService>().jobForTask(task);
+    final key = VideoJobService.statusLabel(job);
+    if (key.isEmpty) return '';
+    return key.tr;
+  }
+
+  Widget _videoJobChip(BuildContext context, Task task) {
+    if (!Get.isRegistered<VideoJobService>()) {
+      return const SizedBox.shrink();
+    }
+    if (!VideoJobService.isVideoTask(task)) {
+      return const SizedBox.shrink();
+    }
+    final job = Get.find<VideoJobService>().jobForTask(task);
+    final key = VideoJobService.statusLabel(job);
+    if (key.isEmpty) return const SizedBox.shrink();
+    final merging = job?.status == 'merging';
+    final failed = job?.status == 'error';
+    final done = job?.status == 'done';
+    final color = failed
+        ? Colors.red
+        : done
+            ? Colors.green
+            : merging
+                ? Colors.orange
+                : Colors.blue;
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.35), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (merging)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: color,
+                ),
+              ),
+            ),
+          Text(
+            key.tr,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 10,
+                ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -609,6 +680,7 @@ class BuildTaskListView extends GetView {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          _videoJobChip(context, task),
                           _protocolBadge(context, task),
                           // Show pending update indicator
                           if (appController.pendingUpdateTask.value?.id ==

@@ -24,6 +24,7 @@ import 'util/updater.dart';
 import 'util/util.dart';
 import 'app/services/location_keep_alive_coordinator.dart';
 import 'app/services/traffic_service.dart';
+import 'app/services/video_job_service.dart';
 
 class StartupArgs {
   static const flagHidden = "hidden";
@@ -133,6 +134,13 @@ Future<void> init(StartupArgs args) async {
     await Get.putAsync(() async => TrafficService().init());
   } catch (e) {
     logger.e("traffic service init fail", e);
+  }
+
+  // 视频 job 合并状态轮询（任务列表展示）
+  try {
+    await Get.putAsync(() async => VideoJobService().init());
+  } catch (e) {
+    logger.e("video job service init fail", e);
   }
 
   // Auto-start incomplete tasks if enabled
