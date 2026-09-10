@@ -70,6 +70,8 @@ class VideoJob {
   final String? error;
   final String outputPath;
   final List<String> taskIds;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 
   VideoJob({
     required this.id,
@@ -78,7 +80,10 @@ class VideoJob {
     this.error,
     required this.outputPath,
     required this.taskIds,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 
   factory VideoJob.fromJson(Map<String, dynamic> json) => VideoJob(
         id: json['id'] as String? ?? '',
@@ -87,6 +92,10 @@ class VideoJob {
         error: json['error'] as String?,
         outputPath: json['outputPath'] as String? ?? '',
         taskIds: (json['taskIds'] as List? ?? []).cast<String>(),
+        createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+            DateTime.now(),
+        updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+            DateTime.now(),
       );
 }
 

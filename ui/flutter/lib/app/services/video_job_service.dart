@@ -1,8 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
-import 'package:get/get.dart';
+import 'package:get/get.dart' hide Progress;
+import 'package:path/path.dart' as p;
 
 import '../../api/api.dart';
+import '../../api/model/meta.dart';
+import '../../api/model/options.dart';
+import '../../api/model/request.dart';
+import '../../api/model/resource.dart';
 import '../../api/model/task.dart';
 import '../../api/model/video.dart';
 
@@ -73,6 +79,59 @@ class VideoJobService extends GetxService {
     if (!isVideoTask(task)) return false;
     final job = jobForTask(task);
     return job != null && job.status == 'done';
+  }
+
+  /// 把已合并完成的视频输出文件转成「已完成」Tab 可展示的合成任务。
+  List<Task> completedOutputTasks() {
+    final out = <Task>[];
+    for (final job in jobs.values) {
+      if (job.status != 'done') continue;
+      if (job.outputPath.isEmpty) continue;
+      final file = File(job.outputPath);
+      if (!file.existsSync()) continue;
+      final name = p.basename(job.outputPath);
+      final dir = p.dirname(job.outputPath);
+      var size = 0;
+      try {
+        size = file.lengthSync();
+      } catch (_) {}
+      final now = job.updatedAt;
+      final meta = Meta(
+        req: Request(
+          url: job.outputPath,
+          labels: {
+            'video.jobId': job.id,
+            'video.role': 'output',
+          },
+        ),
+        opts: Options(name: name, path: dir),
+      );
+      meta.res = Resource(
+        name: name,
+        size: size,
+        range: false,
+        files: [FileInfo(name: name, size: size)],
+      );
+      final task = Task(
+        id: 'video-job-${job.id}',
+        name: name,
+        meta: meta,
+        status: Status.done,
+        uploading: false,
+        progress: Progress(
+          used: 0,
+          speed: 0,
+          downloaded: size,
+          uploadSpeed: 0,
+          uploaded: 0,
+        ),
+        createdAt: job.createdAt,
+        updatedAt: now,
+      );
+      task.protocol = Protocol.http;
+      out.add(task);
+    }
+    return out;
   }
 
   /// 合并状态文案（空=非视频任务或无 job）。
