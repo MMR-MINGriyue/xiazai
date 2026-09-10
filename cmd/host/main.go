@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pkg/browser"
@@ -58,6 +60,58 @@ func wakeup(hidden bool) error {
 		time.Sleep(1 * time.Second)
 	}
 	return fmt.Errorf("start gopeed failed")
+}
+
+// readAPIEndpoint 读取引擎 REST 地址（~/.gopeed/api-endpoint.json），空表示不可用。
+func readAPIEndpoint() (baseURL string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".gopeed", "api-endpoint.json"))
+	if err != nil {
+		return ""
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return ""
+	}
+	if u := m["url"]; u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	if a := m["address"]; a != "" {
+		return "http://" + a
+	}
+	return ""
+}
+
+// postToEngine 直接调用 Go REST API（不经 Flutter）。
+func postToEngine(baseURL, path string, body []byte, timeout time.Duration) (*http.Response, error) {
+	if baseURL == "" {
+		return nil, errors.New("engine endpoint unavailable")
+	}
+	client := &http.Client{Timeout: timeout}
+	url := baseURL + path
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// engineHealthy 探测 /api/v1/info。
+func engineHealthy(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/info")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // postToFlutter sends a POST request to Flutter RPC server
@@ -116,7 +170,11 @@ func pingFlutter() error {
 
 var apiMap = map[string]func(message *Message) (data any, err error){
 	"ping": func(message *Message) (data any, err error) {
-		// 先做命名管道连通性；若失败再尝试 health 端点（应用已起但 RPC 未 ready 的场景）
+		// 引擎 REST 直连可用也算在线
+		if engineHealthy(readAPIEndpoint()) {
+			return true, nil
+		}
+		// 命名管道连通性；若失败再尝试 health 端点
 		if ok, _ := check(); ok {
 			return true, nil
 		}
@@ -144,6 +202,19 @@ var apiMap = map[string]func(message *Message) (data any, err error){
 			silent, _ = v.(bool)
 		}
 
+		// 静默且引擎 REST 可达：直连 Go API，不依赖 Flutter UI
+		if silent {
+			if ep := readAPIEndpoint(); engineHealthy(ep) {
+				// CreateTask body 与 REST /api/v1/tasks 一致（含 req/opts）
+				if resp, perr := postToEngine(ep, "/api/v1/tasks", buf, 30*time.Second); perr == nil {
+					defer resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						return nil, nil
+					}
+				}
+			}
+		}
+
 		if err := wakeup(silent); err != nil {
 			return nil, err
 		}
@@ -165,6 +236,40 @@ var apiMap = map[string]func(message *Message) (data any, err error){
 		silent := false
 		if v, ok := message.Meta["silent"]; ok {
 			silent, _ = v.(bool)
+		}
+
+		// 优先直连引擎 REST（path/method/data 字段）
+		if ep := readAPIEndpoint(); engineHealthy(ep) {
+			var payload struct {
+				Path   string          `json:"path"`
+				Method string          `json:"method"`
+				Data   json.RawMessage `json:"data"`
+			}
+			if jerr := json.Unmarshal(buf, &payload); jerr == nil && payload.Path != "" {
+				method := strings.ToUpper(payload.Method)
+				if method == "" {
+					method = http.MethodGet
+				}
+				var body io.Reader
+				if len(payload.Data) > 0 && method != http.MethodGet {
+					body = bytes.NewReader(payload.Data)
+				}
+				req, rerr := http.NewRequest(method, ep+payload.Path, body)
+				if rerr == nil {
+					req.Header.Set("Content-Type", "application/json")
+					client := &http.Client{Timeout: 60 * time.Second}
+					if resp, derr := client.Do(req); derr == nil {
+						defer resp.Body.Close()
+						respBody, _ := io.ReadAll(resp.Body)
+						var respData map[string]json.RawMessage
+						if uerr := json.Unmarshal(respBody, &respData); uerr == nil {
+							return respData, nil
+						}
+						// 非对象响应原样返回
+						return json.RawMessage(respBody), nil
+					}
+				}
+			}
 		}
 
 		resp, err := postToFlutterRetry("/forward", buf, nil, 60*time.Second, silent)

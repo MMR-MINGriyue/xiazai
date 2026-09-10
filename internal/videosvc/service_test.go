@@ -151,6 +151,13 @@ func (m *mockCreator) GetTask(id string) *TaskStatusView {
 	return m.tasks[id]
 }
 
+func (m *mockCreator) DeleteTasks(ids []string, force bool) error {
+	for _, id := range ids {
+		delete(m.tasks, id)
+	}
+	return nil
+}
+
 func (m *mockCreator) finish(id string) {
 	if t, ok := m.tasks[id]; ok {
 		t.Status = base.DownloadStatusDone
@@ -166,7 +173,7 @@ func TestServiceDownloadAndMerge(t *testing.T) {
 	bins.YtDlp = "yt-dlp-mock"
 	bins.Ffmpeg = "ffmpeg-mock" // 不会真正执行，用 mock merge
 
-	svc := NewService(bins, creator, runner)
+	svc := NewService(bins, creator, runner, nil)
 	defer svc.Close()
 	svc.pollInterval = 20 * time.Millisecond
 
@@ -224,7 +231,7 @@ func TestServiceProgressiveMove(t *testing.T) {
 	creator := newMockCreator()
 	bins := NewBinaries("")
 	bins.YtDlp = "yt-dlp-mock"
-	svc := NewService(bins, creator, runner)
+	svc := NewService(bins, creator, runner, nil)
 	defer svc.Close()
 	svc.pollInterval = 20 * time.Millisecond
 
@@ -268,4 +275,45 @@ func writeFile(path, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func TestFileJobStoreRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileJobStore(dir)
+	j := &Job{
+		ID:         "j1",
+		Title:      "t",
+		Status:     JobDone,
+		OutputPath: filepath.Join(dir, "out.mp4"),
+		TaskIDs:    []string{"a", "b"},
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if err := store.Save(j); err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.LoadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "j1" || list[0].Status != JobDone {
+		t.Fatalf("load = %+v", list)
+	}
+	// 重启恢复：interrupted 状态应标 error
+	bins := NewBinaries("")
+	creator := newMockCreator()
+	pending := &Job{ID: "j2", Status: JobDownloading, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.Save(pending); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(bins, creator, nil, store)
+	defer svc.Close()
+	got, ok := svc.GetJob("j2")
+	if !ok || got.Status != JobError {
+		t.Fatalf("restored pending job = %+v ok=%v", got, ok)
+	}
+	got1, ok1 := svc.GetJob("j1")
+	if !ok1 || got1.Status != JobDone {
+		t.Fatalf("restored done job = %+v ok=%v", got1, ok1)
+	}
 }

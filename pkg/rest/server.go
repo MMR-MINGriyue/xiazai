@@ -102,6 +102,8 @@ func BuildServer(startCfg *model.StartConfig) (*http.Server, net.Listener, error
 	if err := Downloader.Setup(); err != nil {
 		return nil, nil, err
 	}
+	// 视频 job 持久化目录（与下载存储同目录）
+	SetVideoStorageDir(startCfg.StorageDir)
 
 	if startCfg.Network == "unix" {
 		util.SafeRemove(startCfg.Address)

@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../../../../api/api.dart';
 import '../../../../api/model/task.dart';
+import '../../../services/video_job_service.dart';
 
 abstract class TaskListController extends GetxController {
   List<Status> statuses;
@@ -45,10 +46,14 @@ abstract class TaskListController extends GetxController {
   }
 
   getTasksState() async {
-    final tasks = await getTasks(statuses);
+    var list = await getTasks(statuses);
+    // 隐藏已合并完成的视频临时任务
+    if (Get.isRegistered<VideoJobService>()) {
+      final svc = Get.find<VideoJobService>();
+      list = list.where((t) => !svc.shouldHideTask(t)).toList();
+    }
     // sort tasks by create time
-    tasks.sort(compare);
-    this.tasks.value = tasks;
+    list.sort(compare);
+    this.tasks.value = list;
   }
-
 }

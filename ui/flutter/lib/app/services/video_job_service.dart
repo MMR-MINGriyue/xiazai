@@ -68,6 +68,13 @@ class VideoJobService extends GetxService {
     return labels != null && labels.containsKey('video.jobId');
   }
 
+  /// 合并完成的临时下载任务应从列表隐藏（后端也会删任务，此处兜底）。
+  bool shouldHideTask(Task task) {
+    if (!isVideoTask(task)) return false;
+    final job = jobForTask(task);
+    return job != null && job.status == 'done';
+  }
+
   /// 合并状态文案（空=非视频任务或无 job）。
   static String statusLabel(VideoJob? job) {
     if (job == null) return '';

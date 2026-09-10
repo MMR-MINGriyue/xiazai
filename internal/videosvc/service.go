@@ -20,6 +20,8 @@ import (
 type TaskCreator interface {
 	CreateDirect(req *base.Request, opts *base.Options) (string, error)
 	GetTask(id string) *TaskStatusView
+	// DeleteTasks 删除任务记录；force=true 同时删文件。
+	DeleteTasks(ids []string, force bool) error
 }
 
 // TaskStatusView 只含 job 需要的状态。
@@ -67,6 +69,7 @@ type Service struct {
 	bins      *Binaries
 	installer *Installer
 	creator   TaskCreator
+	store     JobStore
 	runner    Runner
 	mergeFF   func(ctx context.Context, ffmpeg, videoPath, audioPath, outPath string) error
 
@@ -77,19 +80,44 @@ type Service struct {
 
 	// pollInterval 任务状态轮询间隔
 	pollInterval time.Duration
+	// CleanupTmpTasks 合并完成后是否删除临时下载任务记录
+	CleanupTmpTasks bool
 }
 
-// NewService 创建服务。runner/mergeFF 可为 nil 用默认实现。
-func NewService(bins *Binaries, creator TaskCreator, runner Runner) *Service {
+// NewService 创建服务。runner/mergeFF 可为 nil 用默认实现；store 为 nil 则不持久化。
+func NewService(bins *Binaries, creator TaskCreator, runner Runner, store JobStore) *Service {
+	if store == nil {
+		store = nopStore{}
+	}
 	s := &Service{
-		bins:         bins,
-		installer:    NewInstaller(bins),
-		creator:      creator,
-		runner:       runner,
-		jobs:         make(map[string]*Job),
-		stop:         make(chan struct{}),
-		pollInterval: time.Second,
-		mergeFF:      defaultMerge,
+		bins:            bins,
+		installer:       NewInstaller(bins),
+		creator:         creator,
+		store:           store,
+		runner:          runner,
+		jobs:            make(map[string]*Job),
+		stop:            make(chan struct{}),
+		pollInterval:    time.Second,
+		mergeFF:         defaultMerge,
+		CleanupTmpTasks: true,
+	}
+	// 恢复历史 job
+	if loaded, err := store.LoadAll(); err == nil {
+		for _, j := range loaded {
+			if j == nil || j.ID == "" {
+				continue
+			}
+			// 中断的 downloading/merging 标记为 error，避免永远卡住
+			if j.Status == JobDownloading || j.Status == JobMerging || j.Status == JobPending {
+				j.Status = JobError
+				if j.Error == "" {
+					j.Error = "interrupted by restart"
+				}
+				j.UpdatedAt = time.Now()
+				_ = store.Save(j)
+			}
+			s.jobs[j.ID] = j
+		}
 	}
 	s.wg.Add(1)
 	go s.pollLoop()
@@ -212,6 +240,7 @@ func (s *Service) Download(ctx context.Context, req *DownloadRequest) (*Job, err
 	s.mu.Lock()
 	s.jobs[jobID] = job
 	s.mu.Unlock()
+	_ = s.store.Save(cloneJob(job))
 	return cloneJob(job), nil
 }
 
@@ -321,7 +350,9 @@ func (s *Service) advance(j *Job) {
 	j.Status = JobMerging
 	j.UpdatedAt = time.Now()
 	jobID := j.ID
+	taskIDs := append([]string(nil), j.TaskIDs...)
 	s.mu.Unlock()
+	_ = s.store.Save(cloneJob(j))
 
 	go func() {
 		if err := s.doMerge(jobID, videoPath, audioPath, outPath); err != nil {
@@ -329,11 +360,20 @@ func (s *Service) advance(j *Job) {
 			return
 		}
 		s.mu.Lock()
+		var snap *Job
 		if jj, ok := s.jobs[jobID]; ok {
 			jj.Status = JobDone
 			jj.UpdatedAt = time.Now()
+			snap = cloneJob(jj)
 		}
 		s.mu.Unlock()
+		if snap != nil {
+			_ = s.store.Save(snap)
+		}
+		// 合并成功后清理临时下载任务（保留最终输出文件）
+		if s.CleanupTmpTasks && len(taskIDs) > 0 && s.creator != nil {
+			_ = s.creator.DeleteTasks(taskIDs, false)
+		}
 	}()
 }
 
@@ -363,11 +403,16 @@ func (s *Service) doMerge(jobID, videoPath, audioPath, outPath string) error {
 
 func (s *Service) setJobError(id, msg string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var snap *Job
 	if j, ok := s.jobs[id]; ok {
 		j.Status = JobError
 		j.Error = msg
 		j.UpdatedAt = time.Now()
+		snap = cloneJob(j)
+	}
+	s.mu.Unlock()
+	if snap != nil {
+		_ = s.store.Save(snap)
 	}
 }
 

@@ -2,15 +2,18 @@ package cmd
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
-	"github.com/GopeedLab/gopeed/pkg/base"
-	"github.com/GopeedLab/gopeed/pkg/rest"
-	"github.com/GopeedLab/gopeed/pkg/rest/model"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+
+	"github.com/GopeedLab/gopeed/pkg/base"
+	"github.com/GopeedLab/gopeed/pkg/rest"
+	"github.com/GopeedLab/gopeed/pkg/rest/model"
 )
 
 //go:embed banner.txt
@@ -54,10 +57,41 @@ func Start(cfg *model.StartConfig) {
 	}
 	watchExit()
 
-	fmt.Printf("Server start success on http://%s\n", listener.Addr().String())
+	addr := listener.Addr().String()
+	writeAPIEndpointFile(addr)
+
+	fmt.Printf("Server start success on http://%s\n", addr)
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		panic(err)
 	}
+}
+
+// writeAPIEndpointFile 写出 REST 地址，供浏览器 host 直连引擎（不经 Flutter RPC）。
+func writeAPIEndpointFile(addr string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".gopeed")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	// 规范化为 host:port
+	hostPort := addr
+	if strings.HasPrefix(hostPort, "[") || strings.Contains(hostPort, ":") {
+		// listener.Addr() 已是 host:port
+	} else {
+		hostPort = "127.0.0.1:" + hostPort
+	}
+	if !strings.Contains(hostPort, ":") {
+		hostPort = "127.0.0.1:" + hostPort
+	}
+	payload := map[string]string{
+		"address": hostPort,
+		"url":     "http://" + hostPort,
+	}
+	data, _ := json.Marshal(payload)
+	_ = os.WriteFile(filepath.Join(dir, "api-endpoint.json"), data, 0644)
 }
 
 func watchExit() {

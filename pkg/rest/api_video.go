@@ -43,11 +43,26 @@ func (c *downloaderTaskCreator) GetTask(id string) *videosvc.TaskStatusView {
 	return view
 }
 
+func (c *downloaderTaskCreator) DeleteTasks(ids []string, force bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return c.d.Delete(&download.TaskFilter{IDs: ids}, force)
+}
+
+// videoStorageDir 由 BuildServer 注入，用于 job 持久化。
+var videoStorageDir string
+
+// SetVideoStorageDir 设置视频 job 存储目录（BuildServer 启动时调用）。
+func SetVideoStorageDir(dir string) {
+	videoStorageDir = dir
+}
+
 func getVideoService() *videosvc.Service {
 	videoOnce.Do(func() {
 		bins := videosvc.NewBinaries("")
-		// 可用环境变量/配置扩展搜索目录；默认 PATH + 常见 Windows 位置
-		videoSvc = videosvc.NewService(bins, &downloaderTaskCreator{d: Downloader}, nil)
+		store := videosvc.NewFileJobStore(videoStorageDir)
+		videoSvc = videosvc.NewService(bins, &downloaderTaskCreator{d: Downloader}, nil, store)
 	})
 	return videoSvc
 }
