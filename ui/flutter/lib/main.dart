@@ -23,6 +23,7 @@ import 'util/scheme_register/scheme_register.dart';
 import 'util/updater.dart';
 import 'util/util.dart';
 import 'app/services/location_keep_alive_coordinator.dart';
+import 'app/services/traffic_service.dart';
 
 class StartupArgs {
   static const flagHidden = "hidden";
@@ -125,6 +126,13 @@ Future<void> init(StartupArgs args) async {
     await controller.loadDownloaderConfig();
   } catch (e) {
     logger.e("load config fail", e);
+  }
+
+  // 今日流量统计（底部状态栏）
+  try {
+    await Get.putAsync(() async => TrafficService().init());
+  } catch (e) {
+    logger.e("traffic service init fail", e);
   }
 
   // Auto-start incomplete tasks if enabled

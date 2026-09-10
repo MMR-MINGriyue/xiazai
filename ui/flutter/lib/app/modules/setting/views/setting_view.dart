@@ -133,6 +133,96 @@ class SettingView extends GetView<SettingController> {
       );
     });
 
+    // 全局限速：UI 单位 KB/s，存储 bytes/s（0 = 不限速）
+    final buildGlobalRateLimit = _buildConfigItem('globalRateLimit', () {
+      final bytes = downloaderCfg.value.globalRateLimit;
+      if (bytes <= 0) {
+        return 'globalRateLimitOff'.tr;
+      }
+      return '${(bytes / 1024).toStringAsFixed(bytes % 1024 == 0 ? 0 : 1)} KB/s';
+    }, (Key key) {
+      final kb =
+          (downloaderCfg.value.globalRateLimit / 1024).toStringAsFixed(0);
+      final rateController = TextEditingController(text: kb);
+      rateController.addListener(() async {
+        final text = rateController.text.trim();
+        final kbps = text.isEmpty ? 0 : (int.tryParse(text) ?? 0);
+        final bytes = kbps * 1024;
+        if (bytes != downloaderCfg.value.globalRateLimit) {
+          downloaderCfg.value.globalRateLimit = bytes;
+          await debounceSave();
+        }
+      });
+
+      return TextField(
+        key: key,
+        focusNode: FocusNode(),
+        controller: rateController,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(hintText: 'globalRateLimitHit'.tr),
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          NumericalRangeFormatter(min: 0, max: 1024 * 1024),
+        ],
+      );
+    });
+
+    final buildSftpConnections = _buildConfigItem('sftpConnections', () {
+      final n = downloaderCfg.value.protocolConfig.sftp.connections;
+      return n <= 0 ? '4' : n.toString();
+    }, (Key key) {
+      final connController = TextEditingController(
+          text: downloaderCfg.value.protocolConfig.sftp.connections.toString());
+      connController.addListener(() async {
+        if (connController.text.isNotEmpty) {
+          final n = int.tryParse(connController.text) ?? 0;
+          if (n != downloaderCfg.value.protocolConfig.sftp.connections) {
+            downloaderCfg.value.protocolConfig.sftp.connections = n;
+            await debounceSave();
+          }
+        }
+      });
+      return TextField(
+        key: key,
+        focusNode: FocusNode(),
+        controller: connController,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(hintText: '1 - 16'),
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          NumericalRangeFormatter(min: 0, max: 16),
+        ],
+      );
+    });
+
+    final buildFtpConnections = _buildConfigItem('ftpConnections', () {
+      final n = downloaderCfg.value.protocolConfig.ftp.connections;
+      return n <= 0 ? '4' : n.toString();
+    }, (Key key) {
+      final connController = TextEditingController(
+          text: downloaderCfg.value.protocolConfig.ftp.connections.toString());
+      connController.addListener(() async {
+        if (connController.text.isNotEmpty) {
+          final n = int.tryParse(connController.text) ?? 0;
+          if (n != downloaderCfg.value.protocolConfig.ftp.connections) {
+            downloaderCfg.value.protocolConfig.ftp.connections = n;
+            await debounceSave();
+          }
+        }
+      });
+      return TextField(
+        key: key,
+        focusNode: FocusNode(),
+        controller: connController,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(hintText: '1 - 16'),
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          NumericalRangeFormatter(min: 0, max: 16),
+        ],
+      );
+    });
+
     final buildDefaultDirectDownload =
         _buildConfigItem('defaultDirectDownload', () {
       return appController.downloaderConfig.value.extra.defaultDirectDownload
@@ -1775,6 +1865,7 @@ class SettingView extends GetView<SettingController> {
                             buildDownloadDir(),
                             buildDownloadCategories(),
                             buildMaxRunning(),
+                            buildGlobalRateLimit(),
                             buildDefaultDirectDownload(),
                             buildAutoStartTasks(),
                             buildAutoTorrentEnable(),
@@ -1810,6 +1901,14 @@ class SettingView extends GetView<SettingController> {
                             buildHttpUa(),
                             buildHttpConnections(),
                             buildHttpUseServerCtime(),
+                          ]),
+                        )),
+                        const Text('SFTP / FTP'),
+                        Card(
+                            child: Column(
+                          children: _addDivider([
+                            buildSftpConnections(),
+                            buildFtpConnections(),
                           ]),
                         )),
                         const Text('BitTorrent'),

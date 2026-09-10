@@ -6,6 +6,9 @@ part 'downloader_config.g.dart';
 class DownloaderConfig {
   String downloadDir;
   int maxRunning;
+
+  /// 全局下载限速（字节/秒）；0 = 不限速
+  int globalRateLimit;
   ProtocolConfig protocolConfig = ProtocolConfig();
   ExtraConfig extra = ExtraConfig();
   ProxyConfig proxy = ProxyConfig();
@@ -18,6 +21,7 @@ class DownloaderConfig {
   DownloaderConfig({
     this.downloadDir = '',
     this.maxRunning = 0,
+    this.globalRateLimit = 0,
     this.autoDeleteMissingFileTasks = false,
   });
 
@@ -32,6 +36,8 @@ class ProtocolConfig {
   HttpConfig http = HttpConfig();
   BtConfig bt = BtConfig();
   Ed2kConfig ed2k = Ed2kConfig();
+  SftpConfig sftp = SftpConfig();
+  FtpConfig ftp = FtpConfig();
 
   ProtocolConfig();
 
@@ -39,6 +45,30 @@ class ProtocolConfig {
       json == null ? ProtocolConfig() : _$ProtocolConfigFromJson(json);
 
   Map<String, dynamic> toJson() => _$ProtocolConfigToJson(this);
+}
+
+@JsonSerializable()
+class SftpConfig {
+  int connections;
+
+  SftpConfig({this.connections = 0});
+
+  factory SftpConfig.fromJson(Map<String, dynamic>? json) =>
+      json == null ? SftpConfig() : _$SftpConfigFromJson(json);
+
+  Map<String, dynamic> toJson() => _$SftpConfigToJson(this);
+}
+
+@JsonSerializable()
+class FtpConfig {
+  int connections;
+
+  FtpConfig({this.connections = 0});
+
+  factory FtpConfig.fromJson(Map<String, dynamic>? json) =>
+      json == null ? FtpConfig() : _$FtpConfigFromJson(json);
+
+  Map<String, dynamic> toJson() => _$FtpConfigToJson(this);
 }
 
 @JsonSerializable()

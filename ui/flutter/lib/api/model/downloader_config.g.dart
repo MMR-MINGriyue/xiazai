@@ -10,6 +10,7 @@ DownloaderConfig _$DownloaderConfigFromJson(Map<String, dynamic> json) =>
     DownloaderConfig(
       downloadDir: json['downloadDir'] as String? ?? '',
       maxRunning: (json['maxRunning'] as num?)?.toInt() ?? 0,
+      globalRateLimit: (json['globalRateLimit'] as num?)?.toInt() ?? 0,
       autoDeleteMissingFileTasks:
           json['autoDeleteMissingFileTasks'] as bool? ?? false,
     )
@@ -29,6 +30,7 @@ Map<String, dynamic> _$DownloaderConfigToJson(DownloaderConfig instance) =>
     <String, dynamic>{
       'downloadDir': instance.downloadDir,
       'maxRunning': instance.maxRunning,
+      'globalRateLimit': instance.globalRateLimit,
       'protocolConfig': instance.protocolConfig.toJson(),
       'extra': instance.extra.toJson(),
       'proxy': instance.proxy.toJson(),
@@ -44,13 +46,37 @@ ProtocolConfig _$ProtocolConfigFromJson(Map<String, dynamic> json) =>
       ..http = HttpConfig.fromJson(json['http'] as Map<String, dynamic>)
       ..bt = BtConfig.fromJson(json['bt'] as Map<String, dynamic>)
       ..ed2k = Ed2kConfig.fromJson(
-          json['ed2k'] as Map<String, dynamic>? ?? <String, dynamic>{});
+          json['ed2k'] as Map<String, dynamic>? ?? <String, dynamic>{})
+      ..sftp = SftpConfig.fromJson(
+          json['sftp'] as Map<String, dynamic>? ?? <String, dynamic>{})
+      ..ftp = FtpConfig.fromJson(
+          json['ftp'] as Map<String, dynamic>? ?? <String, dynamic>{});
 
 Map<String, dynamic> _$ProtocolConfigToJson(ProtocolConfig instance) =>
     <String, dynamic>{
       'http': instance.http.toJson(),
       'bt': instance.bt.toJson(),
       'ed2k': instance.ed2k.toJson(),
+      'sftp': instance.sftp.toJson(),
+      'ftp': instance.ftp.toJson(),
+    };
+
+SftpConfig _$SftpConfigFromJson(Map<String, dynamic> json) => SftpConfig(
+      connections: (json['connections'] as num?)?.toInt() ?? 0,
+    );
+
+Map<String, dynamic> _$SftpConfigToJson(SftpConfig instance) =>
+    <String, dynamic>{
+      'connections': instance.connections,
+    };
+
+FtpConfig _$FtpConfigFromJson(Map<String, dynamic> json) => FtpConfig(
+      connections: (json['connections'] as num?)?.toInt() ?? 0,
+    );
+
+Map<String, dynamic> _$FtpConfigToJson(FtpConfig instance) =>
+    <String, dynamic>{
+      'connections': instance.connections,
     };
 
 HttpConfig _$HttpConfigFromJson(Map<String, dynamic> json) => HttpConfig(

@@ -42,6 +42,66 @@ class BuildTaskListView extends GetView {
         }));
   }
 
+  Widget _protocolBadge(BuildContext context, Task task) {
+    final p = task.protocol;
+    if (p == null) return const SizedBox.shrink();
+    final label = switch (p) {
+      Protocol.http => 'HTTP',
+      Protocol.bt => 'BT',
+      Protocol.ed2k => 'ED2K',
+      Protocol.sftp => 'SFTP',
+      Protocol.ftp => 'FTP',
+    };
+    final color = switch (p) {
+      Protocol.http => Colors.blue,
+      Protocol.bt => Colors.deepPurple,
+      Protocol.ed2k => Colors.teal,
+      Protocol.sftp => Colors.indigo,
+      Protocol.ftp => Colors.orange,
+    };
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.35), width: 0.5),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 10,
+            ),
+      ),
+    );
+  }
+
+  Widget _buildSubtitle(BuildContext context, Task task) {
+    final size = task.meta.res?.size ?? 0;
+    final statusLabel = switch (task.status) {
+      Status.running => 'filterRunning'.tr,
+      Status.wait || Status.ready => 'filterWaiting'.tr,
+      Status.pause => 'filterPaused'.tr,
+      Status.error => 'filterError'.tr,
+      Status.done => 'downloaded'.tr,
+    };
+    final parts = <String>[
+      if (size > 0) Util.fmtByte(size),
+      statusLabel,
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return Text(
+      parts.join(' · '),
+      style: Theme.of(context)
+          .textTheme
+          .bodySmall
+          ?.copyWith(color: Theme.of(context).disabledColor),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
   Widget buildTaskList(BuildContext context, tasks) {
     return ListView.builder(
       itemCount: tasks.length + 1,
@@ -543,7 +603,13 @@ class BuildTaskListView extends GetView {
                   ListTile(
                       title: Row(
                         children: [
-                          Expanded(child: Text(task.name)),
+                          Expanded(
+                            child: Text(
+                              task.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          _protocolBadge(context, task),
                           // Show pending update indicator
                           if (appController.pendingUpdateTask.value?.id ==
                               task.id)
@@ -559,6 +625,7 @@ class BuildTaskListView extends GetView {
                             ),
                         ],
                       ),
+                      subtitle: _buildSubtitle(context, task),
                       leading: Icon(
                         fileIcon(task.name,
                             isFolder: isFolderTask(),
