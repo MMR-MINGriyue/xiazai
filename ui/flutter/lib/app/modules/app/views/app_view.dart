@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
-import 'package:window_manager/window_manager.dart'; // Import the required packages
+import 'package:window_manager/window_manager.dart';
 
 import '../../../../i18n/message.dart';
 import '../../../../theme/theme.dart';
 import '../../../../util/locale_manager.dart';
-import '../../../../util/util.dart'; // Import the required packages
+import '../../../../util/util.dart';
 import '../../../rpc/webview_rpc_overlay.dart';
 import '../../../rpc/webview_rpc_service.dart';
 import '../../../routes/app_pages.dart';
@@ -37,35 +37,73 @@ class AppView extends GetView<AppController> {
         ],
         supportedLocales: messages.keys.keys.map((e) => toLocale(e)).toList(),
         getPages: AppPages.routes,
-
-        // Add listening to theme changes, set the title bar color according to the current system theme.
         builder: (context, child) {
-          // if platform is desktop
           if (Util.isDesktop()) {
-            // actual brightness of the UI
-            Brightness brightness = Theme.of(context).brightness;
-            // Set the title bar to use the actual brightness of the UI
+            final brightness = Theme.of(context).brightness;
             windowManager.setBrightness(brightness);
           }
-          // Fix for GetX Overlay issue with Flutter 3.38.1+
-          // Reference: https://github.com/jonataslaw/getx/issues/3425
-          final entries = <OverlayEntry>[
-            OverlayEntry(builder: (_) => child!),
-          ];
-          if (WebViewRpcService.instance.supported) {
-            entries.add(OverlayEntry(builder: (_) => const WebViewRpcOverlay()));
-          }
-          // 悬浮进度窗（桌面）
-          if (Util.isDesktop() && Get.isRegistered<FloatWindowController>()) {
-            entries.add(OverlayEntry(
-              builder: (_) => FloatWindowOverlay(
-                controller: Get.find<FloatWindowController>(),
-              ),
-            ));
-          }
-          return Overlay(initialEntries: entries);
+          // 稳定 Overlay：避免每次 rebuild 新建导致手势/点击失效
+          return _StableOverlay(child: child ?? const SizedBox.shrink());
         },
       ),
     );
+  }
+}
+
+/// 固定 Overlay 结构，子树变化只更新 entry，不销毁 Overlay。
+class _StableOverlay extends StatefulWidget {
+  const _StableOverlay({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_StableOverlay> createState() => _StableOverlayState();
+}
+
+class _StableOverlayState extends State<_StableOverlay> {
+  late final OverlayEntry _appEntry;
+  OverlayEntry? _webviewEntry;
+  OverlayEntry? _floatEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    _appEntry = OverlayEntry(builder: (_) => widget.child);
+    if (WebViewRpcService.instance.supported) {
+      _webviewEntry = OverlayEntry(builder: (_) => const WebViewRpcOverlay());
+    }
+    if (Util.isDesktop()) {
+      _floatEntry = OverlayEntry(
+        builder: (_) {
+          final c = Get.isRegistered<FloatWindowController>()
+              ? Get.find<FloatWindowController>()
+              : FloatWindowController();
+          return FloatWindowOverlay(controller: c);
+        },
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _StableOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 只刷新主内容 entry
+    _appEntry.markNeedsBuild();
+  }
+
+  @override
+  void dispose() {
+    _appEntry.remove();
+    _webviewEntry?.remove();
+    _floatEntry?.remove();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <OverlayEntry>[_appEntry];
+    if (_webviewEntry != null) entries.add(_webviewEntry!);
+    if (_floatEntry != null) entries.add(_floatEntry!);
+    return Overlay(initialEntries: entries);
   }
 }

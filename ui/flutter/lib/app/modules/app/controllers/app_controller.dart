@@ -38,6 +38,7 @@ import '../../../../util/api_endpoint.dart';
 import '../../../routes/app_pages.dart';
 import '../../../rpc/host_rpc_service.dart';
 import '../../../rpc/webview_rpc_service.dart';
+import '../../float_window/views/float_window.dart';
 import '../../redirect/views/redirect_view.dart';
 import '../../../services/notification_service.dart';
 
@@ -313,6 +314,14 @@ class AppController extends GetxController with WindowListener, TrayListener {
           await Get.rootDelegate.offAndToNamed(Routes.SETTING),
         },
       ),
+      if (Get.isRegistered<FloatWindowController>())
+        MenuItem(
+          label: 'floatWindowOff'.tr,
+          onClick: (menuItem) async => {
+            await Get.find<FloatWindowController>().restore(),
+            await windowManager.show(),
+          },
+        ),
       MenuItem.separator(),
       MenuItem(
         label: 'donate'.tr,
