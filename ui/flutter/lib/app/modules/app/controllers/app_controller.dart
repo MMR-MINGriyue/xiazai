@@ -34,6 +34,7 @@ import '../../../../util/log_util.dart';
 import '../../../../util/package_info.dart';
 import '../../../../util/updater.dart';
 import '../../../../util/util.dart';
+import '../../../../util/api_endpoint.dart';
 import '../../../routes/app_pages.dart';
 import '../../../rpc/host_rpc_service.dart';
 import '../../../rpc/webview_rpc_service.dart';
@@ -131,6 +132,7 @@ class AppController extends GetxController with WindowListener, TrayListener {
       HostRpcService.instance.stop();
       WebViewRpcService.instance.stop();
       LibgopeedBoot.instance.stop();
+      clearAPIEndpointFile();
     }
   }
 
@@ -331,6 +333,7 @@ class AppController extends GetxController with WindowListener, TrayListener {
           } catch (e) {
             logger.w("libgopeed stop fail", e);
           }
+          await clearAPIEndpointFile();
           windowManager.destroy();
         },
       ),

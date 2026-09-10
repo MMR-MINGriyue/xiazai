@@ -22,6 +22,7 @@ import 'util/package_info.dart';
 import 'util/scheme_register/scheme_register.dart';
 import 'util/updater.dart';
 import 'util/util.dart';
+import 'util/api_endpoint.dart';
 import 'app/services/location_keep_alive_coordinator.dart';
 import 'app/services/traffic_service.dart';
 import 'app/services/video_job_service.dart';
@@ -119,6 +120,12 @@ Future<void> init(StartupArgs args) async {
     }
     controller.runningPort.value = await LibgopeedBoot.instance.start(startCfg);
     api.init(startCfg.network, controller.runningAddress(), startCfg.apiToken);
+    // 浏览器 host 直连引擎 REST（tcp 时）
+    await writeAPIEndpointFile(
+      network: startCfg.network,
+      address: startCfg.address,
+      port: controller.runningPort.value,
+    );
   } catch (e) {
     logger.e("libgopeed init fail", e);
   }
