@@ -331,12 +331,12 @@ func TestFtpDownload(t *testing.T) {
 	if fileSum(t, filepath.Join(outDir, "out.bin")) != wantSum {
 		t.Fatal("hash mismatch")
 	}
-	// 4 个默认连接，5MB 应切成多段
+	// 4 个默认连接，5MB 应切成多段；work stealing 可能再拆，允许 >=4
 	f.mu.Lock()
 	nchunks := len(f.data.Chunks)
 	f.mu.Unlock()
-	if nchunks != 4 {
-		t.Fatalf("chunks = %d, want 4", nchunks)
+	if nchunks < 4 {
+		t.Fatalf("chunks = %d, want >= 4", nchunks)
 	}
 }
 
