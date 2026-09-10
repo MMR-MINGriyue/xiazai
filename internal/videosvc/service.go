@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GopeedLab/gopeed/pkg/base"
+	fhttp "github.com/GopeedLab/gopeed/pkg/protocol/http"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
@@ -169,7 +170,8 @@ func (s *Service) Download(ctx context.Context, req *DownloadRequest) (*Job, err
 	videoName := sanitizeFilename(title) + ".video.tmp"
 	vid, err := s.creator.CreateDirect(
 		&base.Request{
-			URL: opt.VideoURL,
+			URL:    opt.VideoURL,
+			Extra:  httpExtra(opt.VideoHeaders),
 			Labels: map[string]string{
 				LabelJobID: jobID,
 				LabelRole:  "video",
@@ -188,7 +190,8 @@ func (s *Service) Download(ctx context.Context, req *DownloadRequest) (*Job, err
 		audioName := sanitizeFilename(title) + ".audio.tmp"
 		aid, err := s.creator.CreateDirect(
 			&base.Request{
-				URL: opt.AudioURL,
+				URL:    opt.AudioURL,
+				Extra:  httpExtra(opt.AudioHeaders),
 				Labels: map[string]string{
 					LabelJobID: jobID,
 					LabelRole:  "audio",
@@ -387,6 +390,26 @@ func cloneJob(j *Job) *Job {
 	c := *j
 	c.TaskIDs = append([]string(nil), j.TaskIDs...)
 	return &c
+}
+
+// httpExtra 把 yt-dlp 下载头转成 HTTP fetcher 的 ReqExtra。
+func httpExtra(headers map[string]string) any {
+	if len(headers) == 0 {
+		return nil
+	}
+	// 只保留对引擎有用的头，避免 Cookie/UA 过长或冲突
+	filtered := make(map[string]string, len(headers))
+	for k, v := range headers {
+		lk := strings.ToLower(k)
+		switch lk {
+		case "referer", "user-agent", "origin", "cookie":
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return &fhttp.ReqExtra{Header: filtered}
 }
 
 func sanitizeFilename(s string) string {

@@ -66,6 +66,13 @@ func (b *Binaries) lookup(name string) string {
 			return p
 		}
 	}
+	// 受管组件默认目录（Installer 落盘位置）
+	if home, err := os.UserHomeDir(); err == nil {
+		p := filepath.Join(home, ".gopeed", "tools", name)
+		if fileExists(p) {
+			return p
+		}
+	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p
 	}

@@ -24,6 +24,8 @@ type YtDlpFormat struct {
 	Protocol   string `json:"protocol"`
 	FormatNote string `json:"format_note"`
 	Tbr        float64 `json:"tbr"`
+	// HttpHeaders 为下载该流所需请求头（B 站等 CDN 依赖 Referer）。
+	HttpHeaders map[string]string `json:"http_headers"`
 }
 
 func (f *YtDlpFormat) Size() int64 {
@@ -68,6 +70,9 @@ type FormatOption struct {
 	// Vcodec/Acodec 仅诊断用
 	Vcodec string `json:"vcodec,omitempty"`
 	Acodec string `json:"acodec,omitempty"`
+	// VideoHeaders / AudioHeaders 下载直链时需附带的 HTTP 头（Referer 等）
+	VideoHeaders map[string]string `json:"videoHeaders,omitempty"`
+	AudioHeaders map[string]string `json:"audioHeaders,omitempty"`
 }
 
 // Runner 执行外部命令，便于测试注入 mock。
@@ -168,15 +173,16 @@ func aggregateFormats(formats []*YtDlpFormat) []FormatOption {
 		}
 		seen[h] = true
 		opts = append(opts, FormatOption{
-			ID:       f.FormatID,
-			Label:    fmt.Sprintf("%dp %s (视频+音频)", h, f.Ext),
-			Height:   h,
-			Width:    f.Width,
-			Ext:      f.Ext,
-			VideoURL: f.URL,
-			Size:     f.Size(),
-			Vcodec:   f.Vcodec,
-			Acodec:   f.Acodec,
+			ID:           f.FormatID,
+			Label:        fmt.Sprintf("%dp %s (视频+音频)", h, f.Ext),
+			Height:       h,
+			Width:        f.Width,
+			Ext:          f.Ext,
+			VideoURL:     f.URL,
+			Size:         f.Size(),
+			Vcodec:       f.Vcodec,
+			Acodec:       f.Acodec,
+			VideoHeaders: f.HttpHeaders,
 		})
 	}
 
@@ -193,23 +199,27 @@ func aggregateFormats(formats []*YtDlpFormat) []FormatOption {
 		audioURL := ""
 		size := f.Size()
 		label := fmt.Sprintf("%dp %s (仅视频)", h, f.Ext)
+		var audioHeaders map[string]string
 		if bestAudio != nil {
 			id = f.FormatID + "+" + bestAudio.FormatID
 			audioURL = bestAudio.URL
+			audioHeaders = bestAudio.HttpHeaders
 			size += bestAudio.Size()
 			label = fmt.Sprintf("%dp %s (视频+音频分离流)", h, f.Ext)
 		}
 		opts = append(opts, FormatOption{
-			ID:       id,
-			Label:    label,
-			Height:   h,
-			Width:    f.Width,
-			Ext:      f.Ext,
-			VideoURL: f.URL,
-			AudioURL: audioURL,
-			Size:     size,
-			Vcodec:   f.Vcodec,
-			Acodec:   "aac",
+			ID:           id,
+			Label:        label,
+			Height:       h,
+			Width:        f.Width,
+			Ext:          f.Ext,
+			VideoURL:     f.URL,
+			AudioURL:     audioURL,
+			Size:         size,
+			Vcodec:       f.Vcodec,
+			Acodec:       "aac",
+			VideoHeaders: f.HttpHeaders,
+			AudioHeaders: audioHeaders,
 		})
 	}
 

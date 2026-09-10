@@ -32,3 +32,5 @@ cmd/web/dist/
 /extensions
 # Local test download dir
 /tmp-dl/
+
+tmp-video-e2e/
