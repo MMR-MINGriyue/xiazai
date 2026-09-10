@@ -81,9 +81,49 @@ func postToFlutter(path string, body []byte, headers map[string]string, timeout 
 	return client.Do(req)
 }
 
+// postToFlutterRetry 连接失败时唤醒应用并重试，降低“丢连接”概率。
+// 重试次数默认 2 次，间隔 1s。
+func postToFlutterRetry(path string, body []byte, headers map[string]string, timeout time.Duration, silent bool) (*http.Response, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		resp, err := postToFlutter(path, body, headers, timeout)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		// 连接类失败：尝试重新拉起 gopeed 后重试
+		if attempt < maxAttempts-1 {
+			_ = wakeup(silent)
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	return nil, fmt.Errorf("flutter rpc unavailable after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// pingFlutter 健康检查（短超时），用于判断 host↔应用链路是否可用。
+func pingFlutter() error {
+	resp, err := postToFlutter("/health", []byte("{}"), nil, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 var apiMap = map[string]func(message *Message) (data any, err error){
 	"ping": func(message *Message) (data any, err error) {
-		return check()
+		// 先做命名管道连通性；若失败再尝试 health 端点（应用已起但 RPC 未 ready 的场景）
+		if ok, _ := check(); ok {
+			return true, nil
+		}
+		if err := pingFlutter(); err != nil {
+			return false, err
+		}
+		return true, nil
 	},
 	"wakeup": func(message *Message) (data any, err error) {
 		silent := false
@@ -113,7 +153,7 @@ var apiMap = map[string]func(message *Message) (data any, err error){
 			metaJson, _ := json.Marshal(message.Meta)
 			headers["X-Gopeed-Host-Meta"] = string(metaJson)
 		}
-		_, err = postToFlutter("/create", buf, headers, 10*time.Second)
+		_, err = postToFlutterRetry("/create", buf, headers, 10*time.Second, silent)
 		return
 	},
 	"forward": func(message *Message) (data any, err error) {
@@ -122,7 +162,12 @@ var apiMap = map[string]func(message *Message) (data any, err error){
 			return
 		}
 
-		resp, err := postToFlutter("/forward", buf, nil, 60*time.Second)
+		silent := false
+		if v, ok := message.Meta["silent"]; ok {
+			silent, _ = v.(bool)
+		}
+
+		resp, err := postToFlutterRetry("/forward", buf, nil, 60*time.Second, silent)
 		if err != nil {
 			return
 		}

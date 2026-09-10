@@ -34,6 +34,9 @@ class HostRpcService {
     }
     _server = await startRpcServer(
       routes: {
+        '/health': (ctx) async {
+          await ctx.writeJSON({'ok': true});
+        },
         '/create': (ctx) async {
           final meta =
               ctx.request.headers['X-Gopeed-Host-Meta']?.firstOrNull ?? '{}';
